@@ -1,0 +1,26 @@
+#!/bin/bash
+
+set -e
+
+# Get OS and Architecture
+os=$(uname -s)
+arch=$(uname -m)
+
+# Set download URL depending on the OS and Architecture
+if [ "$os" = "Darwin" ] && [ "$arch" = "arm64" ]; then
+    url="https://github.com/selectiveci/transport/releases/download/latest/transport-Darwin-aarch64.tar.gz"
+elif [ "$os" = "Linux" ] && [ "$arch" = "x86_64" ]; then
+    url="https://github.com/selectiveci/transport/releases/download/latest/transport-Linux-x86_64.tar.gz"
+else
+    echo "Unsupported OS or Architecture"
+    exit 1
+fi
+
+# Download the binary
+curl -L --fail --silent --show-error $url -o ./temp.tar.gz
+
+# Extract the binary to the lib/bin directory
+tar -xzf ./temp.tar.gz -C $(dirname "$0")/../lib/bin
+
+# Remove the downloaded tar file
+rm ./temp.tar.gz

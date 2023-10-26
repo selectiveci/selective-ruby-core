@@ -1,0 +1,16 @@
+#!/usr/bin/env ruby
+
+require "bundler/setup"
+
+# We test selective-ruby using selective-ruby. This means that
+# SimpleCov.start must be called before our code is loaded.
+if ENV["SELECTIVE_SIMPLECOV"]
+  require "simplecov"
+  SimpleCov.start do
+    add_filter "/spec/"
+  end
+end
+
+require "selective-ruby-core"
+
+Selective::Ruby::Core::Init.run(ARGV.dup)
