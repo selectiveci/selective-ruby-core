@@ -3,16 +3,27 @@
 set -e
 
 # Get OS and Architecture
-os=$(uname -s)
-arch=$(uname -m)
+os=${1:-$(uname -s)}
+arch=${2:-$(uname -m)}
 
-# Set download URL depending on the OS and Architecture
-if [ "$os" = "Darwin" ] && [ "$arch" = "arm64" ]; then
-    url="https://github.com/selectiveci/transport/releases/download/latest/transport-Darwin-aarch64.tar.gz"
-elif [ "$os" = "Linux" ] && [ "$arch" = "x86_64" ]; then
-    url="https://github.com/selectiveci/transport/releases/download/latest/transport-Linux-x86_64.tar.gz"
-else
-    echo "Unsupported OS or Architecture"
+# Darwin has a different architecture string for arm64
+[ "$os" = "Darwin" ] && [ "$arch" = "arm64" ] && arch="aarch64"
+
+# Define base URL
+base_url="https://github.com/selectiveci/transport/releases/download/latest/transport"
+
+# Construct download URL
+url="${base_url}-${os}-${arch}.tar.gz"
+
+# Check for unsupported combinations
+if [ "$os" != "Darwin" ] && [ "$os" != "Linux" ]; then
+    echo "Unsupported OS"
+    exit 1
+fi
+
+if { [ "$os" = "Darwin" ] && [ "$arch" != "aarch64" ] && [ "$arch" != "x86_64" ]; } ||
+   { [ "$os" = "Linux" ] && [ "$arch" != "aarch64" ] && [ "$arch" != "x86_64" ]; }; then
+    echo "Unsupported Architecture"
     exit 1
 fi
 
