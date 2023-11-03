@@ -4,10 +4,10 @@
 VAULT_ID="hehpkyvswnpef4ywyqwi3dbclq"
 
 # Retrieve the RubyGems API key from 1Password and export it
-export RUBYGEMS_API_KEY=$(op item get RubyGems --field label=api_key --vault $VAULT_ID)
+export GEM_HOST_API_KEY=$(op item get RubyGems --field label=api_key --vault $VAULT_ID)
 
-# Check if the RUBYGEMS_API_KEY was successfully retrieved and is not empty
-if [ -z "$RUBYGEMS_API_KEY" ]; then
+# Check if the GEM_HOST_API_KEY was successfully retrieved and is not empty
+if [ -z "$GEM_HOST_API_KEY" ]; then
   echo "Failed to retrieve RubyGems API key."
   exit 1
 fi
@@ -37,16 +37,16 @@ for arch_key in "${!os_arch_map[@]}"; do
   echo "Releasing for architecture: $arch_key"
 
   # Retrieve the OTP from 1Password
-  RUBYGEMS_OTP=$(op item get RubyGems --otp --vault $VAULT_ID)
+  GEM_HOST_OTP_CODE=$(op item get RubyGems --otp --vault $VAULT_ID)
 
-  # Check if the RUBYGEMS_OTP was successfully retrieved and is not empty
-  if [ -z "$RUBYGEMS_OTP" ]; then
+  # Check if the GEM_HOST_OTP_CODE was successfully retrieved and is not empty
+  if [ -z "$GEM_HOST_OTP_CODE" ]; then
     echo "Failed to retrieve RubyGems OTP."
     continue
   fi
 
-  # Set RELEASE_PLATFORM and RUBYGEMS_OTP temporarily and run rake release
-  env RELEASE_PLATFORM=$arch_key RUBYGEMS_OTP=$RUBYGEMS_OTP rake release
+  # Set RELEASE_PLATFORM and GEM_HOST_OTP_CODE temporarily and run rake release
+  env RELEASE_PLATFORM=$arch_key GEM_HOST_OTP_CODE=$GEM_HOST_OTP_CODE rake release
 
   if [ $? -ne 0 ]; then
     echo "Release failed for architecture: $arch_key"
