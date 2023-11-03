@@ -7,6 +7,14 @@ Gem::Specification.new do |spec|
   spec.version = Selective::Ruby::Core::VERSION
   spec.authors = ["Benjamin Wood", "Nate Vick"]
   spec.email = ["ben@hint.io", "nate@hint.io"]
+  spec.license = "MIT"
+
+  # Currently supported release platforms are:
+  # Linux: x86_64-linux, aarch64-linux
+  # MacOS: x86_64-darwin, arm64-darwin
+  if (platform = ENV["RELEASE_PLATFORM"])
+    spec.platform = platform
+  end
 
   spec.summary = "Selective Ruby Client Core"
   spec.description = "Selective is an intelligent test runner for your current CI provider. Get real-time test results, intelligent ordering based on code changes, shorter run times, automatic flake detection, the ability to re-enqueue failed tests, and more."
@@ -25,7 +33,7 @@ Gem::Specification.new do |spec|
     end
   end
 
-  # Add the transport
+  # Add the transport binary
   spec.files << "lib/bin/transport"
 
   spec.bindir = "exe"
@@ -34,7 +42,4 @@ Gem::Specification.new do |spec|
 
   # Uncomment to register a new dependency of your gem
   spec.add_dependency("zeitwerk", "~> 2.6.12")
-
-  # For more information and examples about making a new gem, check out our
-  # guide at: https://bundler.io/guides/creating_gem.html
 end

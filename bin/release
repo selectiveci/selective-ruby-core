@@ -1,0 +1,57 @@
+#!/bin/bash
+
+# Define the vault ID for DRY purposes
+VAULT_ID="hehpkyvswnpef4ywyqwi3dbclq"
+
+# Retrieve the RubyGems API key from 1Password and export it
+export RUBYGEMS_API_KEY=$(op item get RubyGems --field label=api_key --vault $VAULT_ID)
+
+# Check if the RUBYGEMS_API_KEY was successfully retrieved and is not empty
+if [ -z "$RUBYGEMS_API_KEY" ]; then
+  echo "Failed to retrieve RubyGems API key."
+  exit 1
+fi
+
+# Path to the fetch_transport script
+FETCH_SCRIPT="$(dirname "$0")/get_transport"
+
+# List of architectures and associated OS for fetch_transport.sh
+declare -A os_arch_map=(["x86_64-darwin"]="Darwin x86_64" ["arm64-darwin"]="Darwin arm64" ["x86_64-linux"]="Linux x86_64" ["aarch64-linux"]="Linux aarch64")
+
+# Iterate through the list and release for each architecture
+for arch_key in "${!os_arch_map[@]}"; do
+  IFS=' ' read -r -a os_arch <<< "${os_arch_map[$arch_key]}"
+  os="${os_arch[0]}"
+  arch="${os_arch[1]}"
+
+  echo "Fetching transport for OS: $os, ARCH: $arch"
+
+  # Call the fetch_transport script with the correct OS and ARCH
+  bash "$FETCH_SCRIPT" "$os" "$arch"
+
+  if [ $? -ne 0 ]; then
+    echo "Failed to fetch transport for OS: $os, ARCH: $arch"
+    exit 1
+  fi
+
+  echo "Releasing for architecture: $arch_key"
+
+  # Retrieve the OTP from 1Password
+  RUBYGEMS_OTP=$(op item get RubyGems --otp --vault $VAULT_ID)
+
+  # Check if the RUBYGEMS_OTP was successfully retrieved and is not empty
+  if [ -z "$RUBYGEMS_OTP" ]; then
+    echo "Failed to retrieve RubyGems OTP."
+    continue
+  fi
+
+  # Set RELEASE_PLATFORM and RUBYGEMS_OTP temporarily and run rake release
+  env RELEASE_PLATFORM=$arch_key RUBYGEMS_OTP=$RUBYGEMS_OTP rake release
+
+  if [ $? -ne 0 ]; then
+    echo "Release failed for architecture: $arch_key"
+    exit 1
+  fi
+done
+
+echo "Release completed for all architectures."
