@@ -24,6 +24,7 @@ module Selective
       class Init
         def initialize(args)
           @debug = !args.delete("--debug").nil?
+          @log = !args.delete("--log").nil?
           @runner_name, @args, @command = parse_args(args)
           require_runner
         end
@@ -34,10 +35,10 @@ module Selective
 
         private
 
-        attr_reader :debug, :runner_name, :args, :command
+        attr_reader :debug, :log, :runner_name, :args, :command
 
         def run
-          Selective::Ruby::Core::Controller.new(runner, debug).send(command)
+          Selective::Ruby::Core::Controller.new(runner, debug: debug, log: log).send(command)
         end
 
         def parse_args(args)

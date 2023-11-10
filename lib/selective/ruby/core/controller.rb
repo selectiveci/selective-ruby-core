@@ -1,6 +1,7 @@
 require "logger"
 require "uri"
 require "json"
+require 'fileutils'
 
 module Selective
   module Ruby
@@ -8,12 +9,12 @@ module Selective
       class Controller
         @@selective_suppress_reporting = false
 
-        def initialize(runner, debug = false)
+        def initialize(runner, debug: false, log: false)
           @debug = debug
           @runner = runner
           @retries = 0
           @runner_id = ENV.fetch("SELECTIVE_RUNNER_ID", generate_runner_id)
-          @logger = Logger.new("log/#{runner_id}.log")
+          @logger = init_logger(log)
         end
 
         def start(reconnect: false)
@@ -51,6 +52,15 @@ module Selective
         attr_reader :runner, :pipe, :transport_pid, :retries, :logger, :runner_id
 
         BUILD_ENV_SCRIPT_PATH = "../../../bin/build_env.sh".freeze
+
+        def init_logger(enabled)
+          if enabled
+            FileUtils.mkdir_p("log")
+            Logger.new("log/#{runner_id}.log")
+          else
+            Logger.new("/dev/null")
+          end
+        end
 
         def run_main_loop
           loop do
