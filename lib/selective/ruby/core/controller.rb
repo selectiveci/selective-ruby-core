@@ -240,7 +240,7 @@ module Selective
 
         def modified_test_files
           target_branch = build_env["target_branch"]
-          return [] unless target_branch
+          return [] if target_branch.nil? || target_branch.empty?
           
           `git diff #{target_branch} --name-only`.split("\n").filter do |f|
             f.match?(/^#{runner.base_test_path}/)
