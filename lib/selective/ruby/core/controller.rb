@@ -121,8 +121,10 @@ module Selective
         end
 
         def build_env
-          result = `#{Pathname.new(__dir__) + BUILD_ENV_SCRIPT_PATH}`
-          JSON.parse(result)
+          @build_env ||= begin
+            result = `#{Pathname.new(__dir__) + BUILD_ENV_SCRIPT_PATH}`
+            JSON.parse(result)
+          end
         end
 
         def spawn_transport_process(url)
@@ -237,8 +239,10 @@ module Selective
         end
 
         def modified_test_files
-          # Todo: This should find files changed in the current branch
-          `git diff --name-only`.split("\n").filter do |f|
+          target_branch = build_env["target_branch"]
+          return [] unless target_branch
+          
+          `git diff #{target_branch} --name-only`.split("\n").filter do |f|
             f.match?(/^#{runner.base_test_path}/)
           end
         end
