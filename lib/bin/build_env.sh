@@ -3,20 +3,20 @@
 # Detect the platform (only GitHub Actions in this case)
 if [ -n "$GITHUB_ACTIONS" ]; then
   # Get environment variables
-  platform="github_actions"
-  branch="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
-  pr_title="$PR_TITLE"
-  target_branch="${GITHUB_BASE_REF}"
-  actor="$GITHUB_ACTOR"
-  sha="$GITHUB_SHA"
+  platform=github_actions
+  branch=${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}
+  pr_title=$SELECTIVE_PR_TITLE
+  target_branch=${GITHUB_BASE_REF}
+  actor=$GITHUB_ACTOR
+  sha=$GITHUB_SHA
   commit_message=$(git log --format=%s -n 1 $sha)
 else
-  platform="$SELECTIVE_PLATFORM"
-  branch="$SELECTIVE_BRANCH"
-  pr_title="$SELECTIVE_PR_TITLE"
-  target_branch="$SELECTIVE_TARGET_BRANCH"
-  actor="$SELECTIVE_ACTOR"
-  sha="$SELECTIVE_SHA"
+  platform=$SELECTIVE_PLATFORM
+  branch=$SELECTIVE_BRANCH
+  pr_title=$SELECTIVE_PR_TITLE
+  target_branch=$SELECTIVE_TARGET_BRANCH
+  actor=$SELECTIVE_ACTOR
+  sha=$SELECTIVE_SHA
   commit_message=$(git log --format=%s -n 1 $sha)
 fi
 
