@@ -24,7 +24,7 @@ jobs:
       SELECTIVE_RUN_ID: ${{ github.run_id }}-${{ matrix.ruby }}
       SELECTIVE_RUN_ATTEMPT: ${{ github.run_attempt }}
       SELECTIVE_RUNNER_ID: ${{ matrix.ruby }}-${{ matrix.runners }}
-      PR_TITLE: ${{ github.event.pull_request.title }}
+      SELECTIVE_PR_TITLE: ${{ github.event.pull_request.title }}
       CLONE_PAT: ${{ secrets.CLONE_PAT }}
 
     steps:
