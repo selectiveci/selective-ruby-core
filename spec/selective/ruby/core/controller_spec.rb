@@ -15,16 +15,18 @@ RSpec.describe Selective::Ruby::Core::Controller do
 
   describe "#start" do
     before do
-      allow(controller).to receive(:print_init)
+      allow(controller).to receive(:print_notice)
       allow(described_class).to receive(:restore_reporting!)
     end
 
     it "processes commands" do
+      message = "Hello World"
+
       send_commands(controller, [
-        {command: "init", runner_id: controller.runner_id}
+        {command: "print_notice", message: message}
       ])
 
-      expect(controller).to have_received(:print_init).once.with(controller.runner_id)
+      expect(controller).to have_received(:print_notice).once.with(message)
       expect(runner).to have_received(:finish).once
     end
 
