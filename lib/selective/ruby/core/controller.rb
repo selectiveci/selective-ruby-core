@@ -187,8 +187,8 @@ module Selective
 
         def handle_command(response)
           case response[:command]
-          when "init"
-            print_init(response[:runner_id])
+          when "print_notice"
+            print_notice(response[:message])
           when "test_manifest"
             handle_test_manifest
           when "run_test_cases"
@@ -201,10 +201,11 @@ module Selective
             handle_print_message(response[:message])
           when "close"
             handle_close(response[:exit_status])
-
-            # This is here for the sake of test where we
-            # cannot exit but we need to break the loop
+            # This return is here for the sake of test where
+            # we cannot exit but we need to break the loop
             return false
+          else
+            raise "Unknown command received: #{response[:command]}" if debug?
           end
 
           true
@@ -299,10 +300,10 @@ module Selective
           TEXT
         end
 
-        def print_init(runner_id)
+        def print_notice(message)
           puts_indented <<~TEXT
             #{banner}
-            Runner ID: #{runner_id.gsub("selgen-", "")}
+            #{message}
           TEXT
         end
 
