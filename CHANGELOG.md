@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.1.2] - 2023-11-10
+
+- Fix modified_test_files
+- Implement generic "print_notice" message
+- Disable logging by default & add --log flag
+
 ## [0.1.1] - 2023-11-03
 
 - Implemented release scripts
