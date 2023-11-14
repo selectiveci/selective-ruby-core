@@ -1,7 +1,8 @@
 require "logger"
 require "uri"
 require "json"
-require 'fileutils'
+require "fileutils"
+require "open3"
 
 module Selective
   module Ruby
@@ -135,7 +136,6 @@ module Selective
           # The get_transport script is not released with the gem, so this
           # code is intended for development/CI purposes.
           if !File.exist?(transport_path) && File.exist?(get_transport_path)
-            require "open3"
             output, status = Open3.capture2e(get_transport_path)
             if !status.success?
               puts <<~TEXT
@@ -220,10 +220,9 @@ module Selective
         def handle_test_manifest
           self.class.restore_reporting!
           @logger.info("Sending Response: test_manifest")
-          write({type: "test_manifest", data: {
-            test_cases: runner.manifest["examples"],
-            modified_test_files: modified_test_files
-          }})
+          data = {test_cases: runner.manifest["examples"]}
+          data[:modified_test_files] = modified_test_files unless modified_test_files.nil?
+          write({type: "test_manifest", data: data})
         end
 
         def handle_run_test_cases(test_cases)
@@ -240,11 +239,17 @@ module Selective
         end
 
         def modified_test_files
-          target_branch = build_env["target_branch"]
-          return [] if target_branch.nil? || target_branch.empty?
-          
-          `git diff #{target_branch} --name-only`.split("\n").filter do |f|
-            f.match?(/^#{runner.base_test_path}/)
+          @modified_test_files ||= begin
+            target_branch = build_env["target_branch"]
+            return [] if target_branch.nil? || target_branch.empty?
+
+            output, status = Open3.capture2e("git diff #{target_branch} --name-only")
+
+            if status.success?
+              output.split("\n").filter do |f|
+                f.match?(/^#{runner.base_test_path}/)
+              end
+            end
           end
         end
 
