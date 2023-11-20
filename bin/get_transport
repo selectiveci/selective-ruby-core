@@ -10,7 +10,7 @@ arch=${2:-$(uname -m)}
 [ "$os" = "Darwin" ] && [ "$arch" = "arm64" ] && arch="aarch64"
 
 # Define base URL
-base_url="https://github.com/selectiveci/transport/releases/download/latest/transport"
+base_url="https://github.com/selectiveci/transport/releases/latest/download/transport"
 
 # Construct download URL
 url="${base_url}-${os}-${arch}.tar.gz"
