@@ -101,12 +101,14 @@ module Selective
         def transport_url
           @transport_url ||= begin
             api_key = ENV.fetch("SELECTIVE_API_KEY")
-            run_id = ENV.fetch("SELECTIVE_RUN_ID")
-            run_attempt = ENV.fetch("SELECTIVE_RUN_ATTEMPT", SecureRandom.uuid)
             host = ENV.fetch("SELECTIVE_HOST", "wss://app.selective.ci")
 
             # Validate that host is a valid websocket url(starts with ws:// or wss://)
             raise "Invalid host: #{host}" unless host.match?(/^wss?:\/\//)
+
+            run_id = build_env.delete("run_id")
+            run_attempt = build_env.delete("run_attempt")
+            run_attempt = SecureRandom.uuid if run_attempt.nil? || run_attempt.empty?
 
             params = {
               "run_id" => run_id,

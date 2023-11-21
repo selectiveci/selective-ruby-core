@@ -9,6 +9,8 @@ if [ -n "$GITHUB_ACTIONS" ]; then
   target_branch=${GITHUB_BASE_REF}
   actor=$GITHUB_ACTOR
   sha=$GITHUB_SHA
+  run_id=$GITHUB_RUN_ID
+  run_attempt=$GITHUB_RUN_ATTEMPT
   commit_message=$(git log --format=%s -n 1 $sha)
 else
   platform=$SELECTIVE_PLATFORM
@@ -17,6 +19,8 @@ else
   target_branch=$SELECTIVE_TARGET_BRANCH
   actor=$SELECTIVE_ACTOR
   sha=$SELECTIVE_SHA
+  run_id=$SELECTIVE_RUN_ID
+  run_attempt=$SELECTIVE_RUN_ATTEMPT
   commit_message=$(git log --format=%s -n 1 $sha)
 fi
 
@@ -29,6 +33,8 @@ cat <<EOF
     "target_branch": "$target_branch",
     "actor": "$actor",
     "sha": "$sha",
+    "run_id": "$run_id",
+    "run_attempt": "$run_attempt",
     "commit_message": "$commit_message"
   }
 EOF
