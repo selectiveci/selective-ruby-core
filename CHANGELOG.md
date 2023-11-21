@@ -1,5 +1,10 @@
 ## [Unreleased]
 
+## [0.1.3] - 2023-11-20
+
+- Get run_id and run_attempt from build env if possible
+- Misc housekeeping/test/release script updates
+
 ## [0.1.2] - 2023-11-10
 
 - Fix modified_test_files
