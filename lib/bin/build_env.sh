@@ -4,13 +4,13 @@
 if [ -n "$GITHUB_ACTIONS" ]; then
   # Get environment variables
   platform=github_actions
-  branch=${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}
+  branch=${SELECTIVE_BRANCH:-${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}}
   pr_title=$SELECTIVE_PR_TITLE
-  target_branch=${GITHUB_BASE_REF}
+  target_branch=${SELECTIVE_TARGET_BRANCH:-$GITHUB_BASE_REF}
   actor=$GITHUB_ACTOR
-  sha=$GITHUB_SHA
-  run_id=$GITHUB_RUN_ID
-  run_attempt=$GITHUB_RUN_ATTEMPT
+  sha=${SELECTIVE_SHA:-$GITHUB_SHA}
+  run_id=${SELECTIVE_RUN_ID:-$GITHUB_RUN_ID}
+  run_attempt=${SELECTIVE_RUN_ATTEMPT:-$GITHUB_RUN_ATTEMPT}
   commit_message=$(git log --format=%s -n 1 $sha)
 else
   platform=$SELECTIVE_PLATFORM
