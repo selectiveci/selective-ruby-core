@@ -10,6 +10,7 @@ RSpec.describe Selective::Ruby::Core::Controller do
   before do
     allow(Process).to receive(:spawn).and_return(123)
     allow(controller).to receive(:handle_termination_signals)
+    allow(controller).to receive(:wait_for_connectivity)
     allow(controller).to receive(:exit)
   end
 
