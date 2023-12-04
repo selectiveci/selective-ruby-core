@@ -157,11 +157,11 @@ module Selective
 
           Thread.new do
             sleep(5)
-            return if @connectivity
-
-            puts "Transport process failed to start. Exiting..."
-            kill_transport
-            exit
+            unless @connectivity
+              puts "Transport process failed to start. Exiting..."
+              kill_transport
+              exit
+            end
           end
 
           loop do
