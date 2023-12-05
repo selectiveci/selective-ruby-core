@@ -199,7 +199,7 @@ module Selective
 
               sleep(1)
             end
-          rescue NamedPipe::PipeClosedError
+          rescue NamedPipe::PipeClosedError, IOError
             # If the pipe is close, move straight to killing
             # it forcefully.
           end
