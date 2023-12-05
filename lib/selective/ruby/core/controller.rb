@@ -160,7 +160,7 @@ module Selective
             unless @connectivity
               puts "Transport process failed to start. Exiting..."
               kill_transport
-              exit
+              exit(1)
             end
           end
 
