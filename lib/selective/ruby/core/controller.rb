@@ -14,7 +14,7 @@ module Selective
           @debug = debug
           @runner = runner
           @retries = 0
-          @runner_id = ENV.fetch("SELECTIVE_RUNNER_ID", generate_runner_id)
+          @runner_id = safe_filename(ENV.fetch("SELECTIVE_RUNNER_ID", generate_runner_id))
           @logger = init_logger(log)
         end
 
@@ -23,6 +23,7 @@ module Selective
           @transport_pid = spawn_transport_process(reconnect ? transport_url + "&reconnect=true" : transport_url)
 
           handle_termination_signals(transport_pid)
+          wait_for_connectivity
           run_main_loop
         rescue NamedPipe::PipeClosedError
           retry!
@@ -66,8 +67,6 @@ module Selective
         def run_main_loop
           loop do
             message = pipe.read
-            next sleep(0.1) if message.nil? || message.empty?
-
             response = JSON.parse(message, symbolize_names: true)
 
             @logger.info("Received Command: #{response}")
@@ -153,6 +152,31 @@ module Selective
           end
         end
 
+        def wait_for_connectivity
+          @connectivity = false
+
+          Thread.new do
+            sleep(5)
+            unless @connectivity
+              puts "Transport process failed to start. Exiting..."
+              kill_transport
+              exit(1)
+            end
+          end
+
+          loop do
+            message = pipe.read
+
+            # The message is nil until the transport opens the pipe
+            # for writing. So, we must handle that here.
+            next sleep(0.1) if message.nil?
+            
+            response = JSON.parse(message, symbolize_names: true)
+            @connectivity = true if response[:command] == "connected"
+            break
+          end
+        end
+
         def handle_termination_signals(pid)
           ["INT", "TERM"].each do |signal|
             Signal.trap(signal) do
@@ -175,7 +199,7 @@ module Selective
 
               sleep(1)
             end
-          rescue NamedPipe::PipeClosedError
+          rescue NamedPipe::PipeClosedError, IOError
             # If the pipe is close, move straight to killing
             # it forcefully.
           end
@@ -270,6 +294,13 @@ module Selective
 
         def debug?
           @debug
+        end
+
+        def safe_filename(filename)
+          filename
+            .gsub(/[\/\\:*?"<>|\n\r]+/, '_')
+            .gsub(/^\.+|\.+$/, '')
+            .strip[0, 255]
         end
 
         def with_error_handling(include_header: true)
