@@ -4,6 +4,7 @@ require "zeitwerk"
 
 loader = Zeitwerk::Loader.for_gem(warn_on_extra_files: false)
 loader.ignore("#{__dir__}/selective-ruby-core.rb")
+loader.ignore("#{__dir__}/selective/ruby/core/version.rb")
 loader.setup
 
 module Selective
