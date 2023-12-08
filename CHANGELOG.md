@@ -1,5 +1,10 @@
 ## [Unreleased]
 
+## [0.1.5] - 2023-12-08
+
+- Bugfix for zeitwerk when eager loading is enabled
+- Increase the time before failure when connection is not made
+
 ## [0.1.4] - 2023-12-05
 
 - Always prefer selective env-vars (allow overriding CI provider vars)
