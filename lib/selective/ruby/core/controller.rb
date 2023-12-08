@@ -156,7 +156,7 @@ module Selective
           @connectivity = false
 
           Thread.new do
-            sleep(5)
+            sleep(30)
             unless @connectivity
               puts "Transport process failed to start. Exiting..."
               kill_transport
