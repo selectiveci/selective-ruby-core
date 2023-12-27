@@ -20,7 +20,7 @@ module Selective
 
         def start(reconnect: false)
           @pipe = NamedPipe.new("/tmp/#{runner_id}_2", "/tmp/#{runner_id}_1")
-          @transport_pid = spawn_transport_process(reconnect ? transport_url + "&reconnect=true" : transport_url)
+          @transport_pid = spawn_transport_process(reconnect: reconnect)
 
           handle_termination_signals(transport_pid)
           wait_for_connectivity
@@ -95,7 +95,7 @@ module Selective
           "selgen-#{SecureRandom.hex(4)}"
         end
 
-        def transport_url
+        def transport_url(reconnect: false)
           @transport_url ||= begin
             api_key = ENV.fetch("SELECTIVE_API_KEY")
             host = ENV.fetch("SELECTIVE_HOST", "wss://app.selective.ci")
@@ -114,6 +114,8 @@ module Selective
               "runner_id" => runner_id
             }.merge(metadata: build_env.to_json)
 
+            prams[:reconnect] = true if reconnect
+
             query_string = URI.encode_www_form(params)
 
             "#{host}/transport/websocket?#{query_string}"
@@ -127,7 +129,7 @@ module Selective
           end
         end
 
-        def spawn_transport_process(url)
+        def spawn_transport_process(reconnect: false)
           root_path = Gem.loaded_specs["selective-ruby-core"].full_gem_path
           transport_path = File.join(root_path, "lib", "bin", "transport")
           get_transport_path = File.join(root_path, "bin", "get_transport")
@@ -145,7 +147,7 @@ module Selective
             end
           end
 
-          Process.spawn(transport_path, url, runner_id).tap do |pid|
+          Process.spawn(transport_path, transport_url(reconnect: reconnect), runner_id).tap do |pid|
             Process.detach(pid)
           end
         end
