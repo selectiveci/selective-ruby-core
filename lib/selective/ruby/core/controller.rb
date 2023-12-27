@@ -70,9 +70,7 @@ module Selective
             response = JSON.parse(message, symbolize_names: true)
 
             @logger.info("Received Command: #{response}")
-            next if handle_command(response)
-
-            break
+            break if handle_command(response) == :break
           end
         end
 
@@ -211,39 +209,23 @@ module Selective
           # Process already gone noop
         end
 
-        def handle_command(response)
-          case response[:command]
-          when "print_notice"
-            print_notice(response[:message])
-          when "test_manifest"
-            handle_test_manifest
-          when "run_test_cases"
-            handle_run_test_cases(response[:test_case_ids])
-          when "remove_failed_test_case_result"
-            handle_remove_failed_test_case_result(response[:test_case_id])
-          when "reconnect"
-            handle_reconnect
-          when "print_message"
-            handle_print_message(response[:message])
-          when "close"
-            handle_close(response[:exit_status])
-            # This return is here for the sake of test where
-            # we cannot exit but we need to break the loop
-            return false
-          else
-            raise "Unknown command received: #{response[:command]}" if debug?
-          end
-
-          true
+        def handle_command(data)
+          send("handle_#{data[:command]}", data)
+        rescue NoMethodError
+          raise "Unknown command received: #{data[:command]}" if debug?
         end
 
-        def handle_reconnect
+        def handle_print_notice(data)
+          print_notice(data[:message])
+        end
+
+        def handle_reconnect(_data)
           kill_transport
           pipe.reset!
           start(reconnect: true)
         end
 
-        def handle_test_manifest
+        def handle_test_manifest(_data)
           self.class.restore_reporting!
           @logger.info("Sending Response: test_manifest")
           data = {test_cases: runner.manifest["examples"]}
@@ -251,17 +233,34 @@ module Selective
           write({type: "test_manifest", data: data})
         end
 
-        def handle_run_test_cases(test_cases)
-          runner.run_test_cases(test_cases, method(:test_case_callback))
+        def handle_run_test_cases(data)
+          runner.run_test_cases(data[:test_case_ids], method(:test_case_callback))
+        end
+
+        def handle_remove_failed_test_case_result(data)
+          runner.remove_failed_test_case_result(data[:test_case_id])
+        end
+
+        def handle_print_message(data)
+          print_warning(data[:message])
+        end
+
+        def handle_close(data)
+          exit_status = data[:exit_status]
+          self.class.restore_reporting!
+          runner.finish unless exit_status.is_a?(Integer)
+
+          kill_transport
+          pipe.delete_pipes
+          exit(exit_status || runner.exit_status)
+          # This :break is here for the sake of test where
+          # we cannot exit but we need to break the loop
+          :break
         end
 
         def test_case_callback(test_case)
           @logger.info("Sending Response: test_case_result: #{test_case[:id]}")
           write({type: "test_case_result", data: test_case})
-        end
-
-        def handle_remove_failed_test_case_result(test_case_id)
-          runner.remove_failed_test_case_result(test_case_id)
         end
 
         def modified_test_files
@@ -277,19 +276,6 @@ module Selective
               end
             end
           end
-        end
-
-        def handle_print_message(message)
-          print_warning(message)
-        end
-
-        def handle_close(exit_status = nil)
-          self.class.restore_reporting!
-          runner.finish unless exit_status.is_a?(Integer)
-
-          kill_transport
-          pipe.delete_pipes
-          exit(exit_status || runner.exit_status)
         end
 
         def debug?
