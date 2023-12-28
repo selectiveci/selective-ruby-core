@@ -53,7 +53,7 @@ module Selective
 
         attr_reader :runner, :pipe, :transport_pid, :retries, :logger, :runner_id
 
-        BUILD_ENV_SCRIPT_PATH = "../../../bin/build_env.sh".freeze
+        ROOT_GEM_PATH = Gem.loaded_specs["selective-ruby-core"].full_gem_path
 
         def init_logger(enabled)
           if enabled
@@ -124,15 +124,14 @@ module Selective
 
         def build_env
           @build_env ||= begin
-            result = `#{Pathname.new(__dir__) + BUILD_ENV_SCRIPT_PATH}`
+            result = `#{File.join(ROOT_GEM_PATH, "lib", "bin", "build_env.sh")}`
             JSON.parse(result)
           end
         end
 
         def spawn_transport_process(reconnect: false)
-          root_path = Gem.loaded_specs["selective-ruby-core"].full_gem_path
-          transport_path = File.join(root_path, "lib", "bin", "transport")
-          get_transport_path = File.join(root_path, "bin", "get_transport")
+          transport_path = File.join(ROOT_GEM_PATH, "lib", "bin", "transport")
+          get_transport_path = File.join(ROOT_GEM_PATH, "bin", "get_transport")
 
           # The get_transport script is not released with the gem, so this
           # code is intended for development/CI purposes.
