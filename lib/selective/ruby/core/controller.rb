@@ -111,7 +111,12 @@ module Selective
               "run_id" => run_id,
               "run_attempt" => run_attempt,
               "api_key" => api_key,
-              "runner_id" => runner_id
+              "runner_id" => runner_id,
+              "language" => "ruby",
+              "core_version" => Selective::Ruby::Core::VERSION,
+              "framework" => runner.framework,
+              "framework_version" => runner.framework_version,
+              "framework_wrapper_version" => runner.wrapper_version,
             }.merge(metadata: build_env.to_json)
 
             prams[:reconnect] = true if reconnect
