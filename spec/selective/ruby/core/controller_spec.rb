@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 RSpec.describe Selective::Ruby::Core::Controller do
-  let(:runner) { double("runner", finish: nil, exit_status: 1) }
+  let(:runner) { double("runner", finish: nil, exit_status: 1, framework: 'rspec', framework_version: "1.0", wrapper_version: "1.0") }
   let(:controller) { dirty_dirty_unprivate_class(described_class).new(runner) }
 
   let!(:pipe) { Selective::Ruby::Core::NamedPipe.new("/tmp/#{controller.runner_id}_test_2", "/tmp/#{controller.runner_id}_test_1", skip_reset: true) }
