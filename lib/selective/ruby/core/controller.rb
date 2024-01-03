@@ -14,7 +14,7 @@ module Selective
           @debug = debug
           @runner = runner
           @retries = 0
-          @runner_id = safe_filename(ENV.fetch("SELECTIVE_RUNNER_ID", generate_runner_id))
+          @runner_id = safe_filename(get_runner_id)
           @logger = init_logger(log)
         end
 
@@ -54,6 +54,13 @@ module Selective
         attr_reader :runner, :pipe, :transport_pid, :retries, :logger, :runner_id
 
         ROOT_GEM_PATH = Gem.loaded_specs["selective-ruby-core"].full_gem_path
+
+        def get_runner_id
+          runner_id = build_env.delete("runner_id")
+          return generate_runner_id if runner_id.nil? || runner_id.empty?
+
+          runner_id
+        end
 
         def init_logger(enabled)
           if enabled
