@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+## [0.1.6] - 2024-01-03
+
+- Upgrade to Ruby 3.3
+- Add explicit support for CircleCI
+- Refactor controller
+- Send version information in connection parameters
+
 ## [0.1.5] - 2023-12-08
 
 - Bugfix for zeitwerk when eager loading is enabled
