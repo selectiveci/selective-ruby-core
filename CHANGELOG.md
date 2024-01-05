@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+## [0.1.6] - 2024-01-05
+
+- PR diff / test-file correlation for smarter test ordering
+
 ## [0.1.6] - 2024-01-03
 
 - Upgrade to Ruby 3.3
