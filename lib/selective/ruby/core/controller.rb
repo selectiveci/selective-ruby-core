@@ -8,6 +8,7 @@ module Selective
   module Ruby
     module Core
       class Controller
+        include Helper
         @@selective_suppress_reporting = false
 
         def initialize(runner, debug: false, log: false)
@@ -15,6 +16,7 @@ module Selective
           @runner = runner
           @retries = 0
           @runner_id = safe_filename(get_runner_id)
+          @diff = get_diff
           @logger = init_logger(log)
         end
 
@@ -51,9 +53,7 @@ module Selective
 
         private
 
-        attr_reader :runner, :pipe, :transport_pid, :retries, :logger, :runner_id
-
-        ROOT_GEM_PATH = Gem.loaded_specs["selective-ruby-core"].full_gem_path
+        attr_reader :runner, :pipe, :transport_pid, :retries, :logger, :runner_id, :diff
 
         def get_runner_id
           runner_id = build_env.delete("runner_id")
@@ -273,12 +273,9 @@ module Selective
         end
 
         def correlated_files(data)
-          num_commits = data[:num_commits] || 1000
-          Open3.capture2e("git fetch origin #{build_env["target_branch"]} --depth=#{num_commits}")
-          diff = `git diff --name-only origin/#{build_env["target_branch"]}`.split("\n")
-          file_correlation_collector_path = File.join(ROOT_GEM_PATH, "lib", "bin", "file_correlation_collector.sh")
-          correlated_files_json = `#{file_correlation_collector_path} #{build_env["target_branch"]} #{num_commits} #{diff.join(" ")}`
-          JSON.parse(correlated_files_json, symbolize_names: true)
+          return if diff.empty?
+
+          Selective::Ruby::Core::FileCorrelator.new(data, diff, build_env["target_branch"]).correlate
         end
 
         def test_case_callback(test_case)
@@ -288,86 +285,30 @@ module Selective
 
         def modified_test_files
           @modified_test_files ||= begin
-            target_branch = build_env["target_branch"]
-            return [] if target_branch.nil? || target_branch.empty?
+            return [] if diff.empty?
 
-            output, status = Open3.capture2e("git diff #{target_branch} --name-only")
-
-            if status.success?
-              output.split("\n").filter do |f|
-                f.match?(/^#{runner.base_test_path}/)
-              end
+            diff.filter do |f|
+              f.match?(/^#{runner.base_test_path}/)
             end
           end
         end
 
-        def debug?
-          @debug
-        end
+        def get_diff
+          target_branch = build_env["target_branch"]
+          return [] if target_branch.nil? || target_branch.empty?
 
-        def safe_filename(filename)
-          filename
-            .gsub(/[\/\\:*?"<>|\n\r]+/, '_')
-            .gsub(/^\.+|\.+$/, '')
-            .strip[0, 255]
-        end
+          output, status = Open3.capture2e("git diff origin/#{target_branch} --name-only")
 
-        def with_error_handling(include_header: true)
-          yield
-        rescue => e
-          raise e if debug?
-          header = <<~TEXT
-            An error occurred. Please rerun with --debug
-            and contact support at https://selective.ci/support
-          TEXT
-
-          unless @banner_displayed
-            header = <<~TEXT
-              #{banner}
-
-              #{header}
-            TEXT
+          unless status.success?
+            print_warning "Selective was unable to diff with the target branch. This may result in a sub-optimal test order. If the issue persists, please contact support. The output was:\n\n#{output}"
+            return []
           end
 
-          puts_indented <<~TEXT
-            \e[31m
-            #{header if include_header}
-            #{e.message}
-            \e[0m
-          TEXT
-
-          exit 1
+          output.split("\n")
         end
 
-        def print_warning(message)
-          puts_indented <<~TEXT
-            \e[33m
-            #{message}
-            \e[0m
-          TEXT
-        end
-
-        def print_notice(message)
-          puts_indented <<~TEXT
-            #{banner}
-            #{message}
-          TEXT
-        end
-
-        def puts_indented(text)
-          puts text.gsub(/^/, "  ")
-        end
-
-        def banner
-          @banner_displayed = true
-          <<~BANNER
-             ____       _           _   _
-            / ___|  ___| | ___  ___| |_(_)_   _____
-            \\___ \\ / _ \\ |/ _ \\/ __| __| \\ \\ / / _ \\
-             ___) |  __/ |  __/ (__| |_| |\\ V /  __/
-            |____/ \\___|_|\\___|\\___|\\__|_| \\_/ \\___|
-            ________________________________________
-          BANNER
+        def debug?
+          @debug
         end
       end
     end

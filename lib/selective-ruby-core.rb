@@ -13,6 +13,8 @@ module Selective
     module Core
       class Error < StandardError; end
 
+      ROOT_GEM_PATH = Gem.loaded_specs["selective-ruby-core"].full_gem_path
+
       @@available_runners = {}
 
       def self.register_runner(name, runner_class)
