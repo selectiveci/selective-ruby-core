@@ -1,8 +1,6 @@
 require "logger"
 require "uri"
-require "json"
 require "fileutils"
-require "open3"
 
 module Selective
   module Ruby
