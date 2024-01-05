@@ -35,7 +35,7 @@ jobs:
           runner-id: ${{ matrix.ci_node_index }}
 
       - name: Run the default task
-        run: bundle exec selective rspec
+        run: bundle exec selective rspec --log
 
       - name: Store logs
         if: always()
