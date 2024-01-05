@@ -291,12 +291,12 @@ module Selective
 
         def get_diff(num_commits)
           target_branch = build_env["target_branch"]
-          return [] if target_branch.nil? || target_branch.empty?
+          return if target_branch.nil? || target_branch.empty?
 
           Open3.capture2e("git fetch origin #{target_branch} --depth=#{num_commits}").then do |output, status|
             unless status.success?
               print_warning "Selective was unable to fetch the target branch. This may result in a sub-optimal test order. If the issue persists, please contact support. The output was:\n\n#{output}"
-              return []
+              return
             end
           end
 
@@ -305,7 +305,7 @@ module Selective
               output.split("\n")
             else
               print_warning "Selective was unable to diff with the target branch. This may result in a sub-optimal test order. If the issue persists, please contact support. The output was:\n\n#{output}"
-              []
+              nil
             end
           end
         end
