@@ -243,6 +243,7 @@ module Selective
           @logger.info("Sending Response: test_manifest")
           data = {test_cases: runner.manifest["examples"]}
           data[:modified_test_files] = modified_test_files unless modified_test_files.nil?
+          data[:correlated_files] = correlated_files(data)
           write({type: "test_manifest", data: data})
         end
 
@@ -269,6 +270,15 @@ module Selective
           # This :break is here for the sake of test where
           # we cannot exit but we need to break the loop
           :break
+        end
+
+        def correlated_files(data)
+          num_commits = data[:num_commits] || 1000
+          Open3.capture2e("git fetch origin #{build_env["target_branch"]} --depth=#{num_commits}")
+          diff = `git diff --name-only origin/#{build_env["target_branch"]}`.split("\n")
+          file_correlation_collector_path = File.join(ROOT_GEM_PATH, "lib", "bin", "file_correlation_collector.sh")
+          correlated_files_json = `#{file_correlation_collector_path} #{build_env["target_branch"]} #{num_commits} #{diff.join(" ")}`
+          JSON.parse(correlated_files_json, symbolize_names: true)
         end
 
         def test_case_callback(test_case)
