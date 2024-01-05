@@ -1,6 +1,10 @@
 ## [Unreleased]
 
-## [0.1.6] - 2024-01-05
+## [0.1.8] - 2024-01-05
+
+- Fix a minor bug causing the "unable to correlate" warning
+
+## [0.1.7] - 2024-01-05
 
 - PR diff / test-file correlation for smarter test ordering
 
