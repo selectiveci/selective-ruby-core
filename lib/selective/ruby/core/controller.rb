@@ -14,7 +14,6 @@ module Selective
           @runner = runner
           @retries = 0
           @runner_id = safe_filename(get_runner_id)
-          @diff = get_diff
           @logger = init_logger(log)
         end
 
@@ -240,8 +239,11 @@ module Selective
           self.class.restore_reporting!
           @logger.info("Sending Response: test_manifest")
           data = {test_cases: runner.manifest["examples"]}
-          data[:modified_test_files] = modified_test_files unless modified_test_files.nil?
-          data[:correlated_files] = correlated_files(data)
+          num_commits = build_env["num_commits"] || 1000
+          if (diff = get_diff(num_commits))
+            data[:modified_test_files] = modified_test_files(diff)
+            data[:correlated_files] = correlated_files(diff, num_commits)
+          end
           write({type: "test_manifest", data: data})
         end
 
@@ -270,10 +272,8 @@ module Selective
           :break
         end
 
-        def correlated_files(data)
-          return if diff.empty?
-
-          Selective::Ruby::Core::FileCorrelator.new(data, diff, build_env["target_branch"]).correlate
+        def correlated_files(diff, num_commits)
+          Selective::Ruby::Core::FileCorrelator.new(diff, num_commits, build_env["target_branch"]).correlate
         end
 
         def test_case_callback(test_case)
@@ -281,28 +281,33 @@ module Selective
           write({type: "test_case_result", data: test_case})
         end
 
-        def modified_test_files
+        def modified_test_files(diff)
           @modified_test_files ||= begin
-            return [] if diff.empty?
-
             diff.filter do |f|
               f.match?(/^#{runner.base_test_path}/)
             end
           end
         end
 
-        def get_diff
+        def get_diff(num_commits)
           target_branch = build_env["target_branch"]
           return [] if target_branch.nil? || target_branch.empty?
 
-          output, status = Open3.capture2e("git diff origin/#{target_branch} --name-only")
-
-          unless status.success?
-            print_warning "Selective was unable to diff with the target branch. This may result in a sub-optimal test order. If the issue persists, please contact support. The output was:\n\n#{output}"
-            return []
+          Open3.capture2e("git fetch origin #{target_branch} --depth=#{num_commits}").then do |output, status|
+            unless status.success?
+              print_warning "Selective was unable to fetch the target branch. This may result in a sub-optimal test order. If the issue persists, please contact support. The output was:\n\n#{output}"
+              return []
+            end
           end
 
-          output.split("\n")
+          Open3.capture2e("git diff origin/#{target_branch} --name-only").then do |output, status|
+            if status.success?
+              output.split("\n")
+            else
+              print_warning "Selective was unable to diff with the target branch. This may result in a sub-optimal test order. If the issue persists, please contact support. The output was:\n\n#{output}"
+              []
+            end
+          end
         end
 
         def debug?

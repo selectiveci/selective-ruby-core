@@ -1,5 +1,5 @@
 RSpec.describe Selective::Ruby::Core::FileCorrelator do
-  let(:instance) { described_class.new({}, [], target_branch) }
+  let(:instance) { described_class.new([], 1, target_branch) }
   let(:target_branch) { "main" }
 
   describe "#correlate" do
