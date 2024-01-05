@@ -1,13 +1,12 @@
 require "logger"
 require "uri"
-require "json"
 require "fileutils"
-require "open3"
 
 module Selective
   module Ruby
     module Core
       class Controller
+        include Helper
         @@selective_suppress_reporting = false
 
         def initialize(runner, debug: false, log: false)
@@ -51,9 +50,7 @@ module Selective
 
         private
 
-        attr_reader :runner, :pipe, :transport_pid, :retries, :logger, :runner_id
-
-        ROOT_GEM_PATH = Gem.loaded_specs["selective-ruby-core"].full_gem_path
+        attr_reader :runner, :pipe, :transport_pid, :retries, :logger, :runner_id, :diff
 
         def get_runner_id
           runner_id = build_env.delete("runner_id")
@@ -242,7 +239,11 @@ module Selective
           self.class.restore_reporting!
           @logger.info("Sending Response: test_manifest")
           data = {test_cases: runner.manifest["examples"]}
-          data[:modified_test_files] = modified_test_files unless modified_test_files.nil?
+          num_commits = build_env["num_commits"] || 1000
+          if (diff = get_diff(num_commits))
+            data[:modified_test_files] = modified_test_files(diff)
+            data[:correlated_files] = correlated_files(diff, num_commits)
+          end
           write({type: "test_manifest", data: data})
         end
 
@@ -271,93 +272,46 @@ module Selective
           :break
         end
 
+        def correlated_files(diff, num_commits)
+          Selective::Ruby::Core::FileCorrelator.new(diff, num_commits, build_env["target_branch"]).correlate
+        end
+
         def test_case_callback(test_case)
           @logger.info("Sending Response: test_case_result: #{test_case[:id]}")
           write({type: "test_case_result", data: test_case})
         end
 
-        def modified_test_files
+        def modified_test_files(diff)
           @modified_test_files ||= begin
-            target_branch = build_env["target_branch"]
-            return [] if target_branch.nil? || target_branch.empty?
+            diff.filter do |f|
+              f.match?(/^#{runner.base_test_path}/)
+            end
+          end
+        end
 
-            output, status = Open3.capture2e("git diff #{target_branch} --name-only")
+        def get_diff(num_commits)
+          target_branch = build_env["target_branch"]
+          return [] if target_branch.nil? || target_branch.empty?
 
+          Open3.capture2e("git fetch origin #{target_branch} --depth=#{num_commits}").then do |output, status|
+            unless status.success?
+              print_warning "Selective was unable to fetch the target branch. This may result in a sub-optimal test order. If the issue persists, please contact support. The output was:\n\n#{output}"
+              return []
+            end
+          end
+
+          Open3.capture2e("git diff origin/#{target_branch} --name-only").then do |output, status|
             if status.success?
-              output.split("\n").filter do |f|
-                f.match?(/^#{runner.base_test_path}/)
-              end
+              output.split("\n")
+            else
+              print_warning "Selective was unable to diff with the target branch. This may result in a sub-optimal test order. If the issue persists, please contact support. The output was:\n\n#{output}"
+              []
             end
           end
         end
 
         def debug?
           @debug
-        end
-
-        def safe_filename(filename)
-          filename
-            .gsub(/[\/\\:*?"<>|\n\r]+/, '_')
-            .gsub(/^\.+|\.+$/, '')
-            .strip[0, 255]
-        end
-
-        def with_error_handling(include_header: true)
-          yield
-        rescue => e
-          raise e if debug?
-          header = <<~TEXT
-            An error occurred. Please rerun with --debug
-            and contact support at https://selective.ci/support
-          TEXT
-
-          unless @banner_displayed
-            header = <<~TEXT
-              #{banner}
-
-              #{header}
-            TEXT
-          end
-
-          puts_indented <<~TEXT
-            \e[31m
-            #{header if include_header}
-            #{e.message}
-            \e[0m
-          TEXT
-
-          exit 1
-        end
-
-        def print_warning(message)
-          puts_indented <<~TEXT
-            \e[33m
-            #{message}
-            \e[0m
-          TEXT
-        end
-
-        def print_notice(message)
-          puts_indented <<~TEXT
-            #{banner}
-            #{message}
-          TEXT
-        end
-
-        def puts_indented(text)
-          puts text.gsub(/^/, "  ")
-        end
-
-        def banner
-          @banner_displayed = true
-          <<~BANNER
-             ____       _           _   _
-            / ___|  ___| | ___  ___| |_(_)_   _____
-            \\___ \\ / _ \\ |/ _ \\/ __| __| \\ \\ / / _ \\
-             ___) |  __/ |  __/ (__| |_| |\\ V /  __/
-            |____/ \\___|_|\\___|\\___|\\__|_| \\_/ \\___|
-            ________________________________________
-          BANNER
         end
       end
     end

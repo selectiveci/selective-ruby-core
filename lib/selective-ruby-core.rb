@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "zeitwerk"
+require "json"
+require "open3"
 require "#{__dir__}/selective/ruby/core/version"
 
 loader = Zeitwerk::Loader.for_gem(warn_on_extra_files: false)
@@ -12,6 +14,8 @@ module Selective
   module Ruby
     module Core
       class Error < StandardError; end
+
+      ROOT_GEM_PATH = Gem.loaded_specs["selective-ruby-core"].full_gem_path
 
       @@available_runners = {}
 
