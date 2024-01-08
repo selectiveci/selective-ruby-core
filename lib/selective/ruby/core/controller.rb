@@ -220,9 +220,11 @@ module Selective
         end
 
         def handle_command(data)
-          send("handle_#{data[:command]}", data)
-        rescue NoMethodError
-          raise "Unknown command received: #{data[:command]}" if debug?
+          if respond_to? "handle_#{data[:command]}", true
+            send("handle_#{data[:command]}", data)
+          else
+            raise "Unknown command received: #{data[:command]}" if debug?
+          end
         end
 
         def handle_print_notice(data)
@@ -262,7 +264,7 @@ module Selective
         def handle_close(data)
           exit_status = data[:exit_status]
           self.class.restore_reporting!
-          runner.finish unless exit_status.is_a?(Integer)
+          with_error_handling { runner.finish } unless exit_status.is_a?(Integer)
 
           kill_transport
           pipe.delete_pipes
