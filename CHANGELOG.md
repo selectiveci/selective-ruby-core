@@ -1,5 +1,10 @@
 ## [Unreleased]
 
+## [0.1.9] - 2024-01-12
+
+- Bugfix for issue that could cause runner to hang
+- Implement basic configuration validation
+
 ## [0.1.8] - 2024-01-05
 
 - Fix a minor bug causing the "unable to correlate" warning
