@@ -103,6 +103,17 @@ RSpec.describe Selective::Ruby::Core::Controller do
     end
   end
 
+  describe "#validate_build_env" do
+    before do
+      allow(controller).to receive(:puts_indented)
+    end
+
+    it 'raises an error when required configuration is missing' do
+      controller.validate_build_env({})
+      expect(controller).to have_received(:puts_indented).with(/Missing required environment variables: SELECTIVE_HOST/)
+    end
+  end
+
   describe "exec" do
     context "when an error occurs" do
       before do
