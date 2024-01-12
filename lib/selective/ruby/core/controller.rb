@@ -9,6 +9,14 @@ module Selective
         include Helper
         @@selective_suppress_reporting = false
 
+        REQUIRED_CONFIGURATION = {
+          "host" => "SELECTIVE_HOST",
+          "api_key" => "SELECTIVE_API_KEY",
+          "platform" => "SELECTIVE_PLATFORM",
+          "run_id" => "SELECTIVE_RUN_ID",
+          "branch" => "SELECTIVE_BRANCH"
+        }.freeze
+
         def initialize(runner, debug: false, log: false)
           @debug = debug
           @runner = runner
@@ -101,12 +109,8 @@ module Selective
 
         def transport_url(reconnect: false)
           @transport_url ||= begin
-            api_key = ENV.fetch("SELECTIVE_API_KEY")
-            host = ENV.fetch("SELECTIVE_HOST", "wss://app.selective.ci")
-
-            # Validate that host is a valid websocket url(starts with ws:// or wss://)
-            raise "Invalid host: #{host}" unless host.match?(/^wss?:\/\//)
-
+            api_key = build_env.delete("api_key")
+            host = build_env.delete("host")
             run_id = build_env.delete("run_id")
             run_attempt = build_env.delete("run_attempt")
             run_attempt = SecureRandom.uuid if run_attempt.nil? || run_attempt.empty?
@@ -134,7 +138,20 @@ module Selective
         def build_env
           @build_env ||= begin
             result = `#{File.join(ROOT_GEM_PATH, "lib", "bin", "build_env.sh")}`
-            JSON.parse(result)
+            JSON.parse(result).tap do |env|
+              validate_build_env(env)
+            end
+          end
+        end
+
+        def validate_build_env(env)
+          missing = REQUIRED_CONFIGURATION.each_with_object([]) do |(key, env_var), arry|
+            arry << env_var if env[key].nil? || env[key].empty?
+          end
+          
+          with_error_handling do
+            raise "Missing required environment variables: #{missing.join(", ")}" unless missing.empty?
+            raise "Invalid host: #{env['host']}" unless env['host'].match?(/^wss?:\/\//)
           end
         end
 

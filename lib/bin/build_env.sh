@@ -33,6 +33,8 @@ fi
 # Output the JSON
 cat <<EOF
   {
+    "api_key": "$SELECTIVE_API_KEY",
+    "host": "${SELECTIVE_HOST:-wss://app.selective.ci}",
     "platform": "$platform",
     "branch": "$branch",
     "pr_title": "$SELECTIVE_PR_TITLE",
