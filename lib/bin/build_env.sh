@@ -19,6 +19,14 @@ elif [ -n "$CIRCLECI" ]; then
   run_id=$SELECTIVE_RUN_ID
   run_attempt=${SELECTIVE_RUN_ATTEMPT:-$CIRCLE_BUILD_NUM}
   runner_id=${SELECTIVE_RUNNER_ID:-$CIRCLE_NODE_INDEX}
+elif [ -n "$SEMAPHORE" ]; then
+  platform=semaphore
+  branch=${SEMAPHORE_GIT_PR_BRANCH:-$SEMAPHORE_GIT_BRANCH}
+  target_branch=$SEMAPHORE_GIT_BRANCH
+  actor=$SEMAPHORE_GIT_COMMITTER
+  sha=$SEMAPHORE_GIT_SHA
+  run_id=$SEMAPHORE_WORKFLOW_ID
+  runner_id=$SEMAPHORE_JOB_ID
 else
   platform=$SELECTIVE_PLATFORM
   branch=$SELECTIVE_BRANCH
