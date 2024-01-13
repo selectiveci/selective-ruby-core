@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+## [0.2.0] - 2024-01-12
+
+- Add committer information to build_env
+
 ## [0.1.9] - 2024-01-12
 
 - Bugfix for issue that could cause runner to hang
