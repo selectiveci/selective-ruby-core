@@ -19,6 +19,8 @@ gem "appraisal", "~> 2.5"
 
 gem "simplecov", require: false, group: :test
 
+gem 'parallel_tests'
+
 if Dir.exist?(selective_ruby_rspec_path = "../selective-ruby-rspec")
   gem "selective-ruby-rspec", path: selective_ruby_rspec_path
 else
