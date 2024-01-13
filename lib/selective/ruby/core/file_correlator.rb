@@ -17,7 +17,10 @@ module Selective
         def correlate
           JSON.parse(get_correlated_files, symbolize_names: true)
         rescue FileCorrelatorError, JSON::ParserError
-          print_warning "Selective was unable to correlate the diff to test files. This may result in a sub-optimal test order. If the issue persists, please contact support."
+          print_warning(<<~MSG)
+            Selective was unable to correlate the diff to test files. This may result in a sub-optimal test order.
+            If the issue persists, please contact support.
+          MSG
         end
 
         private

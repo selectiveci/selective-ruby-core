@@ -4,6 +4,11 @@ RSpec.describe Selective::Ruby::Core::FileCorrelator do
 
   describe "#correlate" do
     it "returns a hash with the expected shape" do
+      # The fetch normally happens when the diff is generated
+      # but if another runner created the manifest the fetch may
+      # not have happened on the runner that is running this test.
+      # So, we fetch here to ensure this test ddoes not fail.
+      `git fetch origin #{target_branch} --depth=1`
       expect(instance.correlate).to match({:correlated_files => Hash, :uncorrelated_files => Hash})
     end
 
