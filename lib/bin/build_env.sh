@@ -44,6 +44,8 @@ cat <<EOF
     "run_id": "$run_id",
     "run_attempt": "$run_attempt",
     "commit_message": "$(git log --format=%s -n 1 $sha)",
-    "runner_id": "$runner_id"
+    "runner_id": "$runner_id",
+    "committer_name": "$(git show -s --format='%an' -n 1 $sha)",
+    "committer_email": "$(git show -s --format='%ae' -n 1 $sha)"
   }
 EOF
