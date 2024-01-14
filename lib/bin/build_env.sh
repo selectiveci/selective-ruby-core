@@ -26,6 +26,7 @@ elif [ -n "$SEMAPHORE" ]; then
   actor=$SEMAPHORE_GIT_COMMITTER
   sha=$SEMAPHORE_GIT_SHA
   run_id=$SEMAPHORE_WORKFLOW_ID
+  run_attempt=1
   runner_id=$SEMAPHORE_JOB_ID
   pr_title=$SEMAPHORE_GIT_PR_NAME
 fi
