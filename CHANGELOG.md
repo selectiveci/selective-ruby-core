@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+## [0.2.1] - 2024-01-19
+
+- Add Semaphore support
+
 ## [0.2.0] - 2024-01-12
 
 - Add committer information to build_env
