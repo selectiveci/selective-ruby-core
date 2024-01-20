@@ -14,6 +14,7 @@ module Selective
           "api_key" => "SELECTIVE_API_KEY",
           "platform" => "SELECTIVE_PLATFORM",
           "run_id" => "SELECTIVE_RUN_ID",
+          "run_attempt" => "SELECTIVE_RUN_ATTEMPT",
           "branch" => "SELECTIVE_BRANCH"
         }.freeze
 
@@ -113,7 +114,6 @@ module Selective
             host = build_env.delete("host")
             run_id = build_env.delete("run_id")
             run_attempt = build_env.delete("run_attempt")
-            run_attempt = SecureRandom.uuid if run_attempt.nil? || run_attempt.empty?
 
             params = {
               "run_id" => run_id,

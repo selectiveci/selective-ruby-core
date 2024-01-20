@@ -8,7 +8,7 @@ RSpec.describe Selective::Ruby::Core::FileCorrelator do
       # but if another runner created the manifest the fetch may
       # not have happened on the runner that is running this test.
       # So, we fetch here to ensure this test ddoes not fail.
-      `git fetch origin #{target_branch} --depth=1`
+      Open3.capture2e("git fetch origin #{target_branch} --depth=1")
       expect(instance.correlate).to match({:correlated_files => Hash, :uncorrelated_files => Hash})
     end
 
