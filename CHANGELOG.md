@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+## [0.2.2] - 2024-01-26
+
+- Pass test case callback to runner
+
 ## [0.2.1] - 2024-01-19
 
 - Add Semaphore support
