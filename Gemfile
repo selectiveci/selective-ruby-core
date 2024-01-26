@@ -22,5 +22,5 @@ gem "simplecov", require: false, group: :test
 if Dir.exist?(selective_ruby_rspec_path = "../selective-ruby-rspec")
   gem "selective-ruby-rspec", path: selective_ruby_rspec_path
 else
-  gem "selective-ruby-rspec", git: "https://github.com/selectiveci/selective-ruby-rspec.git", branch: "give-batches-to-rspec"
+  gem "selective-ruby-rspec", git: "https://github.com/selectiveci/selective-ruby-rspec.git"
 end
