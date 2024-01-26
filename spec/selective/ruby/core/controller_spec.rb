@@ -1,8 +1,9 @@
 # frozen_string_literal: true
 
 RSpec.describe Selective::Ruby::Core::Controller do
+  let(:runner_class) { class_double("runner_class", new: runner) }
   let(:runner) { double("runner", finish: nil, exit_status: 1, framework: 'rspec', framework_version: "1.0", wrapper_version: "1.0") }
-  let(:controller) { dirty_dirty_unprivate_class(described_class).new(runner) }
+  let(:controller) { dirty_dirty_unprivate_class(described_class).new(runner_class, nil) }
 
   let!(:pipe) { Selective::Ruby::Core::NamedPipe.new("/tmp/#{controller.runner_id}_test_2", "/tmp/#{controller.runner_id}_test_1", skip_reset: true) }
   let!(:reverse_pipe) { Selective::Ruby::Core::NamedPipe.new("/tmp/#{controller.runner_id}_test_1", "/tmp/#{controller.runner_id}_test_2", skip_reset: true) }

@@ -44,7 +44,7 @@ module Selective
         attr_reader :debug, :log, :runner_name, :args, :command
 
         def run
-          Selective::Ruby::Core::Controller.new(runner, debug: debug, log: log).send(command)
+          Selective::Ruby::Core::Controller.new(runner_class, args, debug: debug, log: log).send(command)
         end
 
         def parse_args(args)
@@ -56,8 +56,8 @@ module Selective
           end
         end
 
-        def runner
-          Selective::Ruby::Core.runner_for(runner_name).new(args)
+        def runner_class
+          Selective::Ruby::Core.runner_for(runner_name)
         end
 
         def require_runner
