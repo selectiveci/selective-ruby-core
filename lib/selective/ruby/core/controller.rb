@@ -17,9 +17,9 @@ module Selective
           "branch" => "SELECTIVE_BRANCH"
         }.freeze
 
-        def initialize(runner, debug: false, log: false)
+        def initialize(runner_class, runner_args, debug: false, log: false)
           @debug = debug
-          @runner = runner
+          @runner = runner_class.new(runner_args, method(:test_case_callback))
           @retries = 0
           @runner_id = safe_filename(get_runner_id)
           @logger = init_logger(log)
@@ -267,7 +267,7 @@ module Selective
         end
 
         def handle_run_test_cases(data)
-          runner.run_test_cases(data[:test_case_ids], method(:test_case_callback))
+          runner.run_test_cases(data[:test_case_ids])
         end
 
         def handle_remove_failed_test_case_result(data)
