@@ -83,12 +83,15 @@ module Selective
         end
 
         def run_main_loop
+          time = Time.now
           loop do
             message = pipe.read
+            puts "Time elapsed at pipe read: #{Time.now - time} seconds"
             response = JSON.parse(message, symbolize_names: true)
 
             @logger.info("Received Command: #{response}")
             break if handle_command(response) == :break
+            time = Time.now
           end
         end
 
