@@ -8,6 +8,7 @@ module Selective
       class Controller
         include Helper
         @@selective_suppress_reporting = false
+        @@report_at_finish = {}
 
         REQUIRED_CONFIGURATION = {
           "host" => "SELECTIVE_HOST",
@@ -55,6 +56,10 @@ module Selective
 
         def self.suppress_reporting?
           @@selective_suppress_reporting
+        end
+
+        def self.report_at_finish
+          @@report_at_finish
         end
 
         private
@@ -281,6 +286,13 @@ module Selective
         def handle_close(data)
           exit_status = data[:exit_status]
           self.class.restore_reporting!
+          if debug?
+            puts "\n\n"
+            Selective::Ruby::Core::Controller.report_at_finish.each do |key, value|
+              puts "#{key}: #{value}" if value > 0
+            end
+          end
+          write({type: "report_at_finish", data: Selective::Ruby::Core::Controller.report_at_finish})
           with_error_handling { runner.finish } unless exit_status.is_a?(Integer)
 
           kill_transport
