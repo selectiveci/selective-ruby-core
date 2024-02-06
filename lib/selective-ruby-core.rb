@@ -14,6 +14,7 @@ module Selective
   module Ruby
     module Core
       class Error < StandardError; end
+      class ConnectionLostError < StandardError; end
 
       ROOT_GEM_PATH = Gem.loaded_specs["selective-ruby-core"].full_gem_path
 

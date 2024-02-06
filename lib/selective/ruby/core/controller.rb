@@ -34,7 +34,7 @@ module Selective
           handle_termination_signals(transport_pid)
           wait_for_connectivity
           run_main_loop
-        rescue NamedPipe::PipeClosedError
+        rescue ConnectionLostError
           retry!
         rescue => e
           with_error_handling { raise e }
@@ -67,7 +67,7 @@ module Selective
         attr_reader :runner, :pipe, :transport_pid, :retries, :logger, :runner_id, :diff
 
         def get_runner_id
-          runner_id = build_env.delete("runner_id")
+          runner_id = build_env["runner_id"]
           return generate_runner_id if runner_id.nil? || runner_id.empty?
 
           runner_id
@@ -83,25 +83,22 @@ module Selective
         end
 
         def run_main_loop
-          time = Time.now
           loop do
             message = pipe.read
-            puts "Time elapsed at pipe read: #{Time.now - time} seconds"
             response = JSON.parse(message, symbolize_names: true)
 
             @logger.info("Received Command: #{response}")
             break if handle_command(response) == :break
-            time = Time.now
           end
         end
 
         def retry!
           @retries += 1
 
-          with_error_handling { raise "Too many retries" } if retries > 4
+          with_error_handling { raise "Too many retries" } if retries > 10
 
-          puts("Retrying in #{retries} seconds...")
-          sleep(retries)
+          puts("Retrying in #{retries} seconds...") if debug?
+          sleep(retries > 4 ? 4 : retries)
           kill_transport
 
           pipe.reset!
@@ -117,29 +114,30 @@ module Selective
         end
 
         def transport_url(reconnect: false)
-          @transport_url ||= begin
-            api_key = build_env.delete("api_key")
-            host = build_env.delete("host")
-            run_id = build_env.delete("run_id")
-            run_attempt = build_env.delete("run_attempt")
+          base_transport_url_params[:reconnect] = true if reconnect
+          query_string = URI.encode_www_form(base_transport_url_params)
+          "#{build_env["host"]}/transport/websocket?#{query_string}"
+        end
 
-            params = {
+        def base_transport_url_params
+          @base_transport_url_params ||= begin
+            api_key = build_env["api_key"]
+            run_id = build_env["run_id"]
+            run_attempt = build_env["run_attempt"]
+
+            metadata = build_env.reject { |k,v| %w(host runner_id api_key run_id run_attempt).include?(k) }
+
+            {
+              "api_key" => api_key,
               "run_id" => run_id,
               "run_attempt" => run_attempt,
-              "api_key" => api_key,
               "runner_id" => runner_id,
               "language" => "ruby",
               "core_version" => Selective::Ruby::Core::VERSION,
               "framework" => runner.framework,
               "framework_version" => runner.framework_version,
               "framework_wrapper_version" => runner.wrapper_version,
-            }.merge(metadata: build_env.to_json)
-
-            prams[:reconnect] = true if reconnect
-
-            query_string = URI.encode_www_form(params)
-
-            "#{host}/transport/websocket?#{query_string}"
+            }.merge(metadata: metadata.to_json)
           end
         end
 
@@ -232,7 +230,7 @@ module Selective
 
               sleep(1)
             end
-          rescue NamedPipe::PipeClosedError, IOError
+          rescue ConnectionLostError, IOError
             # If the pipe is close, move straight to killing
             # it forcefully.
           end
@@ -278,8 +276,11 @@ module Selective
           runner.run_test_cases(data[:test_case_ids])
         end
 
+        # Todo: Rename this command to match the method name
+        # on the runner wrapper. We should do something similar
+        # to normalize handle_print_notice and handle_print_message
         def handle_remove_failed_test_case_result(data)
-          runner.remove_failed_test_case_result(data[:test_case_id])
+          runner.remove_test_case_result(data[:test_case_id])
         end
 
         def handle_print_message(data)

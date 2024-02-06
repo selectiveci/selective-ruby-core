@@ -14,7 +14,7 @@ RSpec.describe Selective::Ruby::Core::NamedPipe do
   describe "#read" do
     it "raises an error when the pipe has been closed" do
       reverse_pipe.write_pipe.close
-      expect { named_pipe.read }.to raise_error(described_class::PipeClosedError)
+      expect { named_pipe.read }.to raise_error(Selective::Ruby::Core::ConnectionLostError)
     end
 
     it "raises NoMethodError if not chomp" do
@@ -26,7 +26,7 @@ RSpec.describe Selective::Ruby::Core::NamedPipe do
   describe "#write" do
     it "raises an error when the pipe has been closed" do
       reverse_pipe.read_pipe.close
-      expect { named_pipe.write("hello") }.to raise_error(described_class::PipeClosedError)
+      expect { named_pipe.write("hello") }.to raise_error(Selective::Ruby::Core::ConnectionLostError)
     end
   end
 

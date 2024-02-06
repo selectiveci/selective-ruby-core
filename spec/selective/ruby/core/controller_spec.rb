@@ -35,13 +35,13 @@ RSpec.describe Selective::Ruby::Core::Controller do
 
     it "handles the remove_failed_test_case_result command" do
       test_case_id = "spec/abc/123_spec.rb"
-      allow(runner).to receive(:remove_failed_test_case_result)
+      allow(runner).to receive(:remove_test_case_result)
 
       send_commands(controller, [
         {command: "remove_failed_test_case_result", test_case_id: test_case_id}
       ])
 
-      expect(runner).to have_received(:remove_failed_test_case_result).once.with(test_case_id)
+      expect(runner).to have_received(:remove_test_case_result).once.with(test_case_id)
     end
 
     it "handles the print_message command" do
@@ -66,9 +66,9 @@ RSpec.describe Selective::Ruby::Core::Controller do
       ])
     end
 
-    context "when a NamedPipe::PipeClosedError occurs" do
+    context "when a ConnectionLostError occurs" do
       before do
-        allow(Selective::Ruby::Core::NamedPipe).to receive(:new).and_raise(Selective::Ruby::Core::NamedPipe::PipeClosedError)
+        allow(Selective::Ruby::Core::NamedPipe).to receive(:new).and_raise(Selective::Ruby::Core::ConnectionLostError)
 
         # The retry method calls start again, so we have to do some fancy mocking
         # to ensure we do not end up in an endless loop. Normally the process would
@@ -87,7 +87,6 @@ RSpec.describe Selective::Ruby::Core::Controller do
 
       it "increments the retries counter" do
         expect { controller.start }.to change { controller.retries }.by(1)
-        expect(controller).to have_received(:puts).with("Retrying in 1 seconds...")
       end
     end
 
