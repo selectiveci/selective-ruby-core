@@ -9,7 +9,7 @@ module Selective
         FILE_CORRELATION_COLLECTOR_PATH = File.join(ROOT_GEM_PATH, "lib", "bin", "file_correlation_collector.sh")
 
         def initialize(diff, num_commits, target_branch)
-          @diff = diff
+          @diff = diff.reject {|f| f =~ /^spec\// }
           @num_commits = num_commits
           @target_branch = target_branch
         end

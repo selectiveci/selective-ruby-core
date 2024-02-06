@@ -2,8 +2,6 @@ module Selective
   module Ruby
     module Core
       class NamedPipe
-        class PipeClosedError < StandardError; end
-
         attr_reader :read_pipe_path, :write_pipe_path
 
         def initialize(read_pipe_path, write_pipe_path, skip_reset: false)
@@ -44,7 +42,7 @@ module Selective
             write_pipe.write("\n")
             write_pipe.flush
           rescue Errno::EPIPE
-            raise PipeClosedError
+            raise ConnectionLostError
           end
         end
 
@@ -54,7 +52,7 @@ module Selective
             message = read_pipe.gets.chomp
           rescue NoMethodError => e
             if e.name == :chomp
-              raise PipeClosedError
+              raise ConnectionLostError
             else
               raise e
             end
