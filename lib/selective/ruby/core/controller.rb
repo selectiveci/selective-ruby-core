@@ -290,14 +290,13 @@ module Selective
         def handle_close(data)
           exit_status = data[:exit_status]
           self.class.restore_reporting!
-          if debug?
-            puts "\n\n"
-            Selective::Ruby::Core::Controller.report_at_finish.each do |key, value|
-              puts "#{key}: #{value}" if value > 0
-            end
+
+          with_error_handling do
+            Selective::Ruby::Core::Controller.report_at_finish[:connection_retries] = @retries
+            write({type: "report_at_finish", data: Selective::Ruby::Core::Controller.report_at_finish})
+
+            runner.finish unless exit_status.is_a?(Integer)
           end
-          write({type: "report_at_finish", data: Selective::Ruby::Core::Controller.report_at_finish})
-          with_error_handling { runner.finish } unless exit_status.is_a?(Integer)
 
           kill_transport
           pipe.delete_pipes
