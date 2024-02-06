@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+## [0.2.3] - 2024-02-06
+
+- Fix a bug in the file correlator where test files were being correlated to test files
+- Fix a bug where the reconnect parameter would never be set upon reconnect
+- Increase max number of reconnect/retries from 4 -> 10
+- Implement "report at finish" for debug purposes
+
 ## [0.2.2] - 2024-01-26
 
 - Pass test case callback to runner
