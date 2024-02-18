@@ -25,6 +25,7 @@ module Selective
           @retries = 0
           @runner_id = safe_filename(get_runner_id)
           @logger = init_logger(log)
+          @time_waiting = 0
         end
 
         def start(reconnect: false)
@@ -83,12 +84,15 @@ module Selective
         end
 
         def run_main_loop
+          time = Time.now
           loop do
             message = pipe.read
+            @time_waiting += (Time.now - time)
             response = JSON.parse(message, symbolize_names: true)
 
             @logger.info("Received Command: #{response}")
             break if handle_command(response) == :break
+            time = Time.now
           end
         end
 
@@ -201,7 +205,7 @@ module Selective
             # The message is nil until the transport opens the pipe
             # for writing. So, we must handle that here.
             next sleep(0.1) if message.nil?
-            
+
             response = JSON.parse(message, symbolize_names: true)
             @connectivity = true if response[:command] == "connected"
             break
@@ -292,6 +296,7 @@ module Selective
           self.class.restore_reporting!
 
           with_error_handling do
+            puts "Total Time waiting for transport: #{@time_waiting} seconds" if debug?
             Selective::Ruby::Core::Controller.report_at_finish[:connection_retries] = @retries
             write({type: "report_at_finish", data: Selective::Ruby::Core::Controller.report_at_finish})
 
