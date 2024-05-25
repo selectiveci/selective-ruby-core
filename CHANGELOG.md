@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+## [0.2.5] - 2024-05-25
+- Add first-class support for [Mint](https://www.rwx.com/mint)!
+
 ## [0.2.4] - 2024-02-28
 - Bugfix quotes in env configuration (such as PR titles)
 - Ship transport v0.1.1: https://github.com/selectiveci/transport/releases/tag/v0.1.1
