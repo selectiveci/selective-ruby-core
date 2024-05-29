@@ -276,6 +276,7 @@ module Selective
 
           uri = URI.parse("#{build_env["host"]}/test_manifest")
           http = Net::HTTP.new(uri.host, uri.port)
+          http.use_ssl = true if uri.scheme == 'https'
 
           request = Net::HTTP::Post.new(uri.request_uri)
           request["Authorization"] = base_transport_url_params["api_key"]
