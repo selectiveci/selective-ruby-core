@@ -269,7 +269,20 @@ module Selective
             data[:modified_test_files] = modified_test_files(diff)
             data[:correlated_files] = correlated_files(diff, num_commits)
           end
-          write({type: "test_manifest", data: data})
+          # write({type: "test_manifest", data: data})
+
+          require 'net/http'
+          require 'uri'
+
+          uri = URI.parse("#{build_env["host"]}/test_manifest")
+          http = Net::HTTP.new(uri.host, uri.port)
+
+          request = Net::HTTP::Post.new(uri.request_uri)
+          request["Authorization"] = base_transport_url_params["api_key"]
+          json_data = JSON.dump(type: "test_manifest", data: data)
+          request.set_form_data({"run_id" => base_transport_url_params["run_id"], "runner_id" => base_transport_url_params["runner_id"], "data" => json_data})
+
+          http.request(request)
         end
 
         def handle_run_test_cases(data)
