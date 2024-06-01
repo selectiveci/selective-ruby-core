@@ -276,7 +276,6 @@ module Selective
 
           uri = URI.parse("#{build_env["host"]}/test_manifest")
           http = Net::HTTP.new(uri.host, uri.port)
-          puts uri.scheme.inspect
           http.use_ssl = true if uri.scheme == "wss"
 
           request = Net::HTTP::Post.new(uri.request_uri)
