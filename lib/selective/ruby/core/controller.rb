@@ -263,7 +263,7 @@ module Selective
         def handle_test_manifest(_data)
           self.class.restore_reporting!
           @logger.info("Sending Response: test_manifest")
-          data = {test_cases: runner.manifest["examples"]}
+          data = {test_cases: runner.manifest["examples"] || runner.manifest["test_cases"]}
           num_commits = build_env["num_commits"] || 1000
           if (diff = get_diff(num_commits))
             data[:modified_test_files] = modified_test_files(diff)
