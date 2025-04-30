@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+## [0.2.6] - 2025-04-29
+- Support manifest with test cases
+
 ## [0.2.5] - 2024-05-25
 - Add first-class support for [Mint](https://www.rwx.com/mint)!
 
