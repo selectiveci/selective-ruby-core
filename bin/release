@@ -54,4 +54,17 @@ for arch_key in "${!os_arch_map[@]}"; do
   fi
 done
 
+# Retrieve the OTP from 1Password
+GEM_HOST_OTP_CODE=$(op item get RubyGems --otp --vault $VAULT_ID)
+
+# Remove transport, we don't want to publish it for ruby release
+rm "$(dirname "$0")/../lib/bin/transport"
+
+GEM_HOST_OTP_CODE=$GEM_HOST_OTP_CODE rake release
+
+if [ $? -ne 0 ]; then
+  echo "Release failed for architecture: ruby"
+  exit 1
+fi
+
 echo "Release completed for all architectures."

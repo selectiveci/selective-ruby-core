@@ -154,7 +154,7 @@ module Selective
           missing = REQUIRED_CONFIGURATION.each_with_object([]) do |(key, env_var), arry|
             arry << env_var if env[key].nil? || env[key].empty?
           end
-          
+
           with_error_handling do
             raise "Missing required environment variables: #{missing.join(", ")}" unless missing.empty?
             raise "Invalid host: #{env['host']}" unless env['host'].match?(/^wss?:\/\//)
@@ -165,16 +165,22 @@ module Selective
           transport_path = File.join(ROOT_GEM_PATH, "lib", "bin", "transport")
           get_transport_path = File.join(ROOT_GEM_PATH, "bin", "get_transport")
 
-          # The get_transport script is not released with the gem, so this
-          # code is intended for development/CI purposes.
-          if !File.exist?(transport_path) && File.exist?(get_transport_path)
-            output, status = Open3.capture2e(get_transport_path)
-            if !status.success?
-              puts <<~TEXT
-                Failed to download transport binary.
+          if !File.exist?(transport_path)
+            # The get_transport script is not released with the gem, so this
+            # code is intended for development/CI purposes.
+            if File.exist?(get_transport_path)
+              output, status = Open3.capture2e(get_transport_path)
+              if !status.success?
+                puts <<~TEXT
+                  Failed to download transport binary.
 
-                #{output}
-              TEXT
+                  #{output}
+                TEXT
+              end
+            else
+              with_error_handling do
+                raise "Selective transport binary not found. Please contact support or compile it manually. See: https://github.com/selectiveci/transport"
+              end
             end
           end
 
@@ -201,7 +207,7 @@ module Selective
             # The message is nil until the transport opens the pipe
             # for writing. So, we must handle that here.
             next sleep(0.1) if message.nil?
-            
+
             response = JSON.parse(message, symbolize_names: true)
             @connectivity = true if response[:command] == "connected"
             break
