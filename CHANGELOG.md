@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+## [0.2.7] - 2025-06-03
+- Add ruby release without compiled transport included
+
 ## [0.2.6] - 2025-04-29
 - Support manifest with test cases
 
