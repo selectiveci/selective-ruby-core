@@ -34,7 +34,9 @@ Gem::Specification.new do |spec|
   end
 
   # Add the transport binary
-  spec.files << "lib/bin/transport"
+  unless ENV["RELEASE_PLATFORM"].nil?
+    spec.files << "lib/bin/transport"
+  end
 
   spec.bindir = "exe"
   spec.executables = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
