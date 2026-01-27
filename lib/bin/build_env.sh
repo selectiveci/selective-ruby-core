@@ -38,20 +38,20 @@ elif [ -n "$SEMAPHORE" ]; then
   commit_message=$(git log --format=%s -n 1 $sha)
   committer_name=$(git show -s --format='%an' -n 1 $sha)
   committer_email=$(git show -s --format='%ae' -n 1 $sha)
-elif [ -n "$MINT" ]; then
-  platform=mint
-  branch="${MINT_GIT_REF_NAME}"
-  actor="${MINT_ACTOR}"
-  sha="${MINT_GIT_COMMIT_SHA}"
-  run_id="${MINT_RUN_ID}"
-  run_attempt="${MINT_TASK_ATTEMPT_NUMBER}"
-  runner_id="${MINT_PARALLEL_INDEX}"
-  # Mint does not preserve the .git directory by default to improve the likelihood of cache hits. Instead
-  # of asking git for commit information, then, we rely on the mint/git-clone leaf to populate the necessary
+elif [ -n "$RWX" ]; then
+  platform=rwx
+  branch="${RWX_GIT_REF_NAME}"
+  actor="${RWX_ACTOR}"
+  sha="${RWX_GIT_COMMIT_SHA}"
+  run_id="${RWX_RUN_ID}"
+  run_attempt="${RWX_TASK_ATTEMPT_NUMBER}"
+  runner_id="${RWX_PARALLEL_INDEX}"
+  # RWX does not preserve the .git directory by default to improve the likelihood of cache hits. Instead
+  # of asking git for commit information, then, we rely on the git/clone package to populate the necessary
   # metadata in environment variables.
-  commit_message="${MINT_GIT_COMMIT_SUMMARY}"
-  committer_name="${MINT_GIT_COMMITTER_NAME}"
-  committer_email="${MINT_GIT_COMMITTER_EMAIL}"
+  commit_message="${RWX_GIT_COMMIT_SUMMARY}"
+  committer_name="${RWX_GIT_COMMITTER_NAME}"
+  committer_email="${RWX_GIT_COMMITTER_EMAIL}"
 fi
 
 function escape() {
