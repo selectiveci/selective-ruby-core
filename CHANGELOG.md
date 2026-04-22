@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+## [0.2.8] - 2025-06-03
+- Update metadata to align with Mint's rename to RWX
+
 ## [0.2.7] - 2025-06-03
 - Add ruby release without compiled transport included
 
