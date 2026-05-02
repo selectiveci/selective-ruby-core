@@ -32,6 +32,8 @@ RSpec.describe "build_env.sh" do
     MINT_TASK_ATTEMPT_NUMBER MINT_PARALLEL_INDEX MINT_GIT_COMMIT_SUMMARY
     MINT_GIT_COMMITTER_NAME MINT_GIT_COMMITTER_EMAIL MINT_GIT_REPOSITORY_NAME
     MINT_GIT_REPOSITORY_URL
+    SELECTIVE_GIT_BRANCH SELECTIVE_GIT_PROVIDER GITHUB_EVENT_PATH
+    SELECTIVE_BASE_SHA SEMAPHORE_GIT_COMMIT_RANGE
   ].freeze
 
   # Run the script with a fresh environment and return parsed JSON output.
@@ -214,6 +216,89 @@ RSpec.describe "build_env.sh" do
       expect(out["git_repo_full_name"]).to eq("")
       expect(out["git_provider"]).to eq("")
       expect(out["platform"]).to eq("")
+    end
+  end
+
+  describe "base_sha detection" do
+    it "parses base_sha from the GHA pull_request event payload via jq" do
+      Dir.mktmpdir do |tmp|
+        event_path = File.join(tmp, "event.json")
+        File.write(event_path, JSON.dump(
+          "pull_request" => { "base" => { "sha" => "basefeedfeed" } }
+        ))
+        env = {
+          "GITHUB_ACTIONS" => "true",
+          "GITHUB_REPOSITORY" => "acme/widgets",
+          "GITHUB_SHA" => "headfeedfeed",
+          "GITHUB_EVENT_PATH" => event_path
+        }
+        out = run_with(env)
+        expect(out["base_sha"]).to eq("basefeedfeed")
+      end
+    end
+
+    it "parses base_sha from the GHA push event's 'before' field" do
+      Dir.mktmpdir do |tmp|
+        event_path = File.join(tmp, "event.json")
+        File.write(event_path, JSON.dump("before" => "beforesha1234", "after" => "headfeedfeed"))
+        env = {
+          "GITHUB_ACTIONS" => "true",
+          "GITHUB_REPOSITORY" => "acme/widgets",
+          "GITHUB_SHA" => "headfeedfeed",
+          "GITHUB_EVENT_PATH" => event_path
+        }
+        out = run_with(env)
+        expect(out["base_sha"]).to eq("beforesha1234")
+      end
+    end
+
+    it "treats the all-zero 'before' SHA as no base" do
+      Dir.mktmpdir do |tmp|
+        event_path = File.join(tmp, "event.json")
+        File.write(event_path, JSON.dump("before" => "0" * 40))
+        env = {
+          "GITHUB_ACTIONS" => "true",
+          "GITHUB_REPOSITORY" => "acme/widgets",
+          "GITHUB_SHA" => "headfeedfeed",
+          "GITHUB_EVENT_PATH" => event_path
+        }
+        out = run_with(env)
+        expect(out["base_sha"]).to eq("")
+      end
+    end
+
+    it "parses base_sha from SEMAPHORE_GIT_COMMIT_RANGE" do
+      env = {
+        "SEMAPHORE" => "true",
+        "SEMAPHORE_GIT_PROVIDER" => "github",
+        "SEMAPHORE_GIT_REPO_SLUG" => "acme/widgets",
+        "SEMAPHORE_GIT_SHA" => "headfeedfeed",
+        "SEMAPHORE_GIT_BRANCH" => "main",
+        "SEMAPHORE_GIT_COMMIT_RANGE" => "basefeedfeed...headfeedfeed"
+      }
+      out = run_with(env)
+      expect(out["base_sha"]).to eq("basefeedfeed")
+    end
+
+    it "lets SELECTIVE_BASE_SHA override everything" do
+      Dir.mktmpdir do |tmp|
+        event_path = File.join(tmp, "event.json")
+        File.write(event_path, JSON.dump("before" => "detectedsha"))
+        env = {
+          "GITHUB_ACTIONS" => "true",
+          "GITHUB_REPOSITORY" => "acme/widgets",
+          "GITHUB_SHA" => "headfeedfeed",
+          "GITHUB_EVENT_PATH" => event_path,
+          "SELECTIVE_BASE_SHA" => "overridesha"
+        }
+        out = run_with(env)
+        expect(out["base_sha"]).to eq("overridesha")
+      end
+    end
+
+    it "emits empty base_sha when no source is available" do
+      out = run_with({})
+      expect(out["base_sha"]).to eq("")
     end
   end
 

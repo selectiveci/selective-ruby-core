@@ -37,6 +37,22 @@ if [ -n "$GITHUB_ACTIONS" ]; then
   committer_email=$(git show -s --format='%ae' -n 1 $sha)
   git_repo_full_name=$GITHUB_REPOSITORY
   git_provider=github
+  # Extract base_sha from the webhook event payload GitHub drops at
+  # $GITHUB_EVENT_PATH. Prefer jq when available (handles both push and PR
+  # events); fall back to a grep-based parse for the top-level "before" field
+  # on push events when jq is missing.
+  if [ -f "$GITHUB_EVENT_PATH" ]; then
+    if command -v jq >/dev/null 2>&1; then
+      base_sha=$(jq -r '.pull_request.base.sha // .before // empty' < "$GITHUB_EVENT_PATH" 2>/dev/null)
+    else
+      base_sha=$(grep -o '"before"[[:space:]]*:[[:space:]]*"[^"]*"' "$GITHUB_EVENT_PATH" | head -1 | sed -E 's/.*"[^"]*"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')
+    fi
+    # GitHub emits all-zero SHAs when the ref was just created and has no prior
+    # state. Treat that as "no base" so the server falls through to head-only.
+    if [ "$base_sha" = "0000000000000000000000000000000000000000" ]; then
+      base_sha=""
+    fi
+  fi
 elif [ -n "$CIRCLECI" ]; then
   platform=circleci
   branch=$CIRCLE_BRANCH
@@ -78,6 +94,11 @@ elif [ -n "$SEMAPHORE" ]; then
   git_provider=$SEMAPHORE_GIT_PROVIDER
   if [ "$git_provider" = "github" ]; then
     git_repo_full_name=$SEMAPHORE_GIT_REPO_SLUG
+  fi
+  # SEMAPHORE_GIT_COMMIT_RANGE is "<base>...<head>" on push/PR events; take the
+  # left side. It is unset when the build isn't commit-scoped.
+  if [ -n "$SEMAPHORE_GIT_COMMIT_RANGE" ]; then
+    base_sha=$(echo "$SEMAPHORE_GIT_COMMIT_RANGE" | sed -E 's/\.\.\..*//')
   fi
 elif [ -n "$BUILDKITE" ]; then
   platform=buildkite
@@ -172,6 +193,7 @@ cat <<EOF
     "target_branch": "$(escape "${SELECTIVE_TARGET_BRANCH:-$target_branch}")",
     "actor": "$(escape "${SELECTIVE_ACTOR:-$actor}")",
     "sha": "$(escape "${SELECTIVE_SHA:-$sha}")",
+    "base_sha": "$(escape "${SELECTIVE_BASE_SHA:-$base_sha}")",
     "run_id": "$(escape "${SELECTIVE_RUN_ID:-$run_id}")",
     "run_attempt": "$(escape "${SELECTIVE_RUN_ATTEMPT:-$run_attempt}")",
     "runner_id": "$(escape "${SELECTIVE_RUNNER_ID:-$runner_id}")",
