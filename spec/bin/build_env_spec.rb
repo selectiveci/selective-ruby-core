@@ -32,12 +32,16 @@ RSpec.describe "build_env.sh" do
     MINT_TASK_ATTEMPT_NUMBER MINT_PARALLEL_INDEX MINT_GIT_COMMIT_SUMMARY
     MINT_GIT_COMMITTER_NAME MINT_GIT_COMMITTER_EMAIL MINT_GIT_REPOSITORY_NAME
     MINT_GIT_REPOSITORY_URL
-    SELECTIVE_GITHUB_REPO SELECTIVE_GIT_PROVIDER
   ].freeze
 
   # Run the script with a fresh environment and return parsed JSON output.
   def run_with(env)
-    scrubbed = PLATFORM_ENV_VARS.each_with_object({}) { |k, h| h[k] = nil }
+    # Scrub everything the build_env.sh script looks at: platform detection
+    # vars above, plus every SELECTIVE_* override so the caller's shell
+    # environment (e.g. a loaded .env) can't bleed into the test.
+    scrubbed = {}
+    PLATFORM_ENV_VARS.each { |k| scrubbed[k] = nil }
+    ENV.keys.grep(/\ASELECTIVE_/).each { |k| scrubbed[k] = nil }
     # Disable git shell-outs by pointing at an empty temp dir so the fallback
     # branches are deterministic.
     Dir.mktmpdir do |tmp|
@@ -48,7 +52,7 @@ RSpec.describe "build_env.sh" do
     end
   end
 
-  describe "github_repo_full_name detection" do
+  describe "git_repo_full_name detection" do
     it "reads GITHUB_REPOSITORY on GitHub Actions" do
       env = {
         "GITHUB_ACTIONS" => "true",
@@ -58,7 +62,7 @@ RSpec.describe "build_env.sh" do
       }
       out = run_with(env)
       expect(out["platform"]).to eq("github_actions")
-      expect(out["github_repo_full_name"]).to eq("selectiveci/selective-ruby-core")
+      expect(out["git_repo_full_name"]).to eq("selectiveci/selective-ruby-core")
       expect(out["git_provider"]).to eq("github")
     end
 
@@ -72,7 +76,7 @@ RSpec.describe "build_env.sh" do
       }
       out = run_with(env)
       expect(out["platform"]).to eq("circleci")
-      expect(out["github_repo_full_name"]).to eq("acme/widgets")
+      expect(out["git_repo_full_name"]).to eq("acme/widgets")
       expect(out["git_provider"]).to eq("github")
     end
 
@@ -85,7 +89,7 @@ RSpec.describe "build_env.sh" do
         "CIRCLE_SHA1" => "abc123"
       }
       out = run_with(env)
-      expect(out["github_repo_full_name"]).to eq("")
+      expect(out["git_repo_full_name"]).to eq("")
       expect(out["git_provider"]).to eq("bitbucket")
     end
 
@@ -101,7 +105,7 @@ RSpec.describe "build_env.sh" do
       }
       out = run_with(env)
       expect(out["platform"]).to eq("semaphore")
-      expect(out["github_repo_full_name"]).to eq("acme/widgets")
+      expect(out["git_repo_full_name"]).to eq("acme/widgets")
       expect(out["git_provider"]).to eq("github")
     end
 
@@ -114,7 +118,7 @@ RSpec.describe "build_env.sh" do
         "SEMAPHORE_GIT_BRANCH" => "main"
       }
       out = run_with(env)
-      expect(out["github_repo_full_name"]).to eq("")
+      expect(out["git_repo_full_name"]).to eq("")
       expect(out["git_provider"]).to eq("bitbucket")
     end
 
@@ -128,7 +132,7 @@ RSpec.describe "build_env.sh" do
       }
       out = run_with(env)
       expect(out["platform"]).to eq("buildkite")
-      expect(out["github_repo_full_name"]).to eq("acme/widgets")
+      expect(out["git_repo_full_name"]).to eq("acme/widgets")
       expect(out["git_provider"]).to eq("github")
     end
 
@@ -140,7 +144,7 @@ RSpec.describe "build_env.sh" do
         "BUILDKITE_COMMIT" => "abc123"
       }
       out = run_with(env)
-      expect(out["github_repo_full_name"]).to eq("acme/widgets")
+      expect(out["git_repo_full_name"]).to eq("acme/widgets")
     end
 
     it "does not emit a slug for non-github Buildkite pipelines" do
@@ -151,7 +155,7 @@ RSpec.describe "build_env.sh" do
         "BUILDKITE_COMMIT" => "abc123"
       }
       out = run_with(env)
-      expect(out["github_repo_full_name"]).to eq("")
+      expect(out["git_repo_full_name"]).to eq("")
       expect(out["git_provider"]).to eq("gitlab")
     end
 
@@ -165,7 +169,7 @@ RSpec.describe "build_env.sh" do
       }
       out = run_with(env)
       expect(out["platform"]).to eq("rwx")
-      expect(out["github_repo_full_name"]).to eq("acme/widgets")
+      expect(out["git_repo_full_name"]).to eq("acme/widgets")
       expect(out["git_provider"]).to eq("github")
     end
 
@@ -177,7 +181,7 @@ RSpec.describe "build_env.sh" do
         "RWX_GIT_COMMIT_SHA" => "abc123"
       }
       out = run_with(env)
-      expect(out["github_repo_full_name"]).to eq("")
+      expect(out["git_repo_full_name"]).to eq("")
       expect(out["git_provider"]).to eq("gitlab")
     end
 
@@ -190,24 +194,24 @@ RSpec.describe "build_env.sh" do
       }
       out = run_with(env)
       expect(out["platform"]).to eq("rwx")
-      expect(out["github_repo_full_name"]).to eq("acme/widgets")
+      expect(out["git_repo_full_name"]).to eq("acme/widgets")
       expect(out["git_provider"]).to eq("github")
     end
 
-    it "lets SELECTIVE_GITHUB_REPO override everything" do
+    it "lets SELECTIVE_GIT_REPO override everything" do
       env = {
         "GITHUB_ACTIONS" => "true",
         "GITHUB_REPOSITORY" => "detected/repo",
-        "SELECTIVE_GITHUB_REPO" => "override/repo",
+        "SELECTIVE_GIT_REPO" => "override/repo",
         "GITHUB_SHA" => "abc123"
       }
       out = run_with(env)
-      expect(out["github_repo_full_name"]).to eq("override/repo")
+      expect(out["git_repo_full_name"]).to eq("override/repo")
     end
 
     it "emits empty strings when nothing is detectable and no CI platform is set" do
       out = run_with({})
-      expect(out["github_repo_full_name"]).to eq("")
+      expect(out["git_repo_full_name"]).to eq("")
       expect(out["git_provider"]).to eq("")
       expect(out["platform"]).to eq("")
     end
@@ -231,7 +235,7 @@ RSpec.describe "build_env.sh" do
           "BUILDKITE_COMMIT" => "abc"
         }
         out = run_with(env)
-        expect(out["github_repo_full_name"]).to eq(expected)
+        expect(out["git_repo_full_name"]).to eq(expected)
       end
     end
   end

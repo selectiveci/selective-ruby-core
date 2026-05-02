@@ -35,7 +35,7 @@ if [ -n "$GITHUB_ACTIONS" ]; then
   commit_message=$(git log --format=%s -n 1 $sha)
   committer_name=$(git show -s --format='%an' -n 1 $sha)
   committer_email=$(git show -s --format='%ae' -n 1 $sha)
-  github_repo_full_name=$GITHUB_REPOSITORY
+  git_repo_full_name=$GITHUB_REPOSITORY
   git_provider=github
 elif [ -n "$CIRCLECI" ]; then
   platform=circleci
@@ -54,7 +54,7 @@ elif [ -n "$CIRCLECI" ]; then
   if [ -n "$CIRCLE_PROJECT_USERNAME" ] && [ -n "$CIRCLE_PROJECT_REPONAME" ]; then
     git_provider=$(detect_git_provider_from_url "$CIRCLE_REPOSITORY_URL")
     if [ "$git_provider" = "github" ] || [ -z "$CIRCLE_REPOSITORY_URL" ]; then
-      github_repo_full_name="${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}"
+      git_repo_full_name="${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}"
       # If we fell through the "no repo URL" path, default provider to github
       # since the slug composition path is specific to GitHub-style owner/repo.
       [ -z "$git_provider" ] && git_provider=github
@@ -77,7 +77,7 @@ elif [ -n "$SEMAPHORE" ]; then
   committer_email=$(git show -s --format='%ae' -n 1 $sha)
   git_provider=$SEMAPHORE_GIT_PROVIDER
   if [ "$git_provider" = "github" ]; then
-    github_repo_full_name=$SEMAPHORE_GIT_REPO_SLUG
+    git_repo_full_name=$SEMAPHORE_GIT_REPO_SLUG
   fi
 elif [ -n "$BUILDKITE" ]; then
   platform=buildkite
@@ -95,7 +95,7 @@ elif [ -n "$BUILDKITE" ]; then
   # Buildkite tells us the provider explicitly, and BUILDKITE_REPO is the URL.
   if [ "$BUILDKITE_PIPELINE_PROVIDER" = "github" ]; then
     git_provider=github
-    github_repo_full_name=$(parse_github_slug "$BUILDKITE_REPO")
+    git_repo_full_name=$(parse_github_slug "$BUILDKITE_REPO")
   else
     git_provider=$BUILDKITE_PIPELINE_PROVIDER
   fi
@@ -118,7 +118,7 @@ elif [ -n "$RWX" ]; then
   # points elsewhere, so cross-check the URL host before trusting it.
   git_provider=$(detect_git_provider_from_url "$RWX_GIT_REPOSITORY_URL")
   if [ "$git_provider" = "github" ]; then
-    github_repo_full_name="${RWX_GIT_REPOSITORY_NAME}"
+    git_repo_full_name="${RWX_GIT_REPOSITORY_NAME}"
   fi
 elif [ -n "$MINT" ]; then
   platform=rwx
@@ -136,20 +136,20 @@ elif [ -n "$MINT" ]; then
   committer_email="${MINT_GIT_COMMITTER_EMAIL}"
   git_provider=$(detect_git_provider_from_url "$MINT_GIT_REPOSITORY_URL")
   if [ "$git_provider" = "github" ]; then
-    github_repo_full_name="${MINT_GIT_REPOSITORY_NAME}"
+    git_repo_full_name="${MINT_GIT_REPOSITORY_NAME}"
   fi
 fi
 
 # Final fallbacks when we haven't resolved the GitHub slug from a known CI
 # platform. Order:
-#   1. Explicit SELECTIVE_GITHUB_REPO override (always wins; see below).
+#   1. Explicit SELECTIVE_GIT_REPO override (always wins; see below).
 #   2. git config --get remote.origin.url on a local checkout.
-if [ -z "$github_repo_full_name" ] && command -v git >/dev/null 2>&1; then
+if [ -z "$git_repo_full_name" ] && command -v git >/dev/null 2>&1; then
   origin_url=$(git config --get remote.origin.url 2>/dev/null || true)
   if [ -n "$origin_url" ]; then
     parsed_slug=$(parse_github_slug "$origin_url")
     if [ -n "$parsed_slug" ]; then
-      github_repo_full_name="$parsed_slug"
+      git_repo_full_name="$parsed_slug"
       [ -z "$git_provider" ] && git_provider=github
     elif [ -z "$git_provider" ]; then
       git_provider=$(detect_git_provider_from_url "$origin_url")
@@ -178,7 +178,7 @@ cat <<EOF
     "commit_message": "$(escape "${SELECTIVE_COMMIT_MESSAGE:-$commit_message}")",
     "committer_name": "$(escape "${SELECTIVE_COMMITTER_NAME:-$committer_name}")",
     "committer_email": "$(escape "${SELECTIVE_COMMITTER_EMAIL:-$committer_email}")",
-    "github_repo_full_name": "$(escape "${SELECTIVE_GITHUB_REPO:-$github_repo_full_name}")",
+    "git_repo_full_name": "$(escape "${SELECTIVE_GIT_REPO:-$git_repo_full_name}")",
     "git_provider": "$(escape "${SELECTIVE_GIT_PROVIDER:-$git_provider}")"
   }
 EOF

@@ -1,5 +1,5 @@
 ## [Unreleased]
-- Add `github_repo_full_name` and `git_provider` to run metadata (GitHub Actions, CircleCI, Semaphore, Buildkite, RWX/Mint). Supports explicit `SELECTIVE_GITHUB_REPO` / `SELECTIVE_GIT_PROVIDER` overrides and a git-remote fallback. Fields are emitted as empty strings when the repo is not a GitHub repo; the server side is responsible for enforcing presence when billing requires it.
+- Add `git_repo_full_name` and `git_provider` to run metadata (GitHub Actions, CircleCI, Semaphore, Buildkite, RWX/Mint). Supports explicit `SELECTIVE_GIT_REPO` / `SELECTIVE_GIT_PROVIDER` overrides and a git-remote fallback. Fields are emitted as empty strings when the repo is not a GitHub repo; the server side is responsible for enforcing presence when billing requires it.
 - Add Buildkite as a recognized CI platform.
 
 ## [0.2.8] - 2025-06-03
