@@ -16,7 +16,10 @@ module Selective
           "platform" => "SELECTIVE_PLATFORM",
           "run_id" => "SELECTIVE_RUN_ID",
           "run_attempt" => "SELECTIVE_RUN_ATTEMPT",
-          "branch" => "SELECTIVE_BRANCH"
+          "branch" => "SELECTIVE_BRANCH",
+          "sha" => "SELECTIVE_SHA",
+          "git_repo_full_name" => "SELECTIVE_GIT_REPO",
+          "git_provider" => "SELECTIVE_GIT_PROVIDER"
         }.freeze
 
         def initialize(runner_class, runner_args, debug: false, log: false)
