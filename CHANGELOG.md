@@ -1,4 +1,6 @@
 ## [Unreleased]
+- Add `git_repo_full_name`, `git_provider`, and `base_sha` to run metadata (GitHub Actions, CircleCI, Semaphore, Buildkite, RWX/Mint). Supports explicit `SELECTIVE_GIT_REPO` / `SELECTIVE_GIT_PROVIDER` / `SELECTIVE_BASE_SHA` overrides and a git-remote fallback for the slug. `base_sha` is extracted from GitHub Actions event payload (both PR and push events) and from Semaphore's `SEMAPHORE_GIT_COMMIT_RANGE`. Fields are emitted as empty strings when unresolvable; the server side is responsible for enforcing presence when billing requires it.
+- Add Buildkite as a recognized CI platform.
 
 ## [0.2.8] - 2025-06-03
 - Update metadata to align with Mint's rename to RWX
