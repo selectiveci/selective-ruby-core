@@ -38,6 +38,11 @@ Gem::Specification.new do |spec|
     spec.files << "lib/bin/transport"
   end
 
+  # The optional test map tracer. extconf.rb writes a no-op Makefile when it
+  # can't build (no compiler, unsupported Ruby), so installation never fails
+  # because of it; the runner then reports it can't record.
+  spec.extensions = ["ext/selective_tracer/extconf.rb"]
+
   spec.bindir = "exe"
   spec.executables = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]

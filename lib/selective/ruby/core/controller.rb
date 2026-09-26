@@ -24,10 +24,9 @@ module Selective
 
         def initialize(runner_class, runner_args, debug: false, log: false)
           @debug = debug
+          @log = log
           @runner = runner_class.new(runner_args, method(:test_case_callback))
           @retries = 0
-          @runner_id = safe_filename(get_runner_id)
-          @logger = init_logger(log)
         end
 
         def start(reconnect: false)
@@ -67,7 +66,19 @@ module Selective
 
         private
 
-        attr_reader :runner, :pipe, :transport_pid, :retries, :logger, :runner_id, :diff
+        attr_reader :runner, :pipe, :transport_pid, :retries, :diff
+
+        # Resolved on first use rather than in the constructor: `selective
+        # exec` (the plain framework run behind the manifest dry-run) never
+        # connects, so it must not require the CI environment that naming a
+        # runner validates.
+        def runner_id
+          @runner_id ||= safe_filename(get_runner_id)
+        end
+
+        def logger
+          @logger ||= init_logger(@log)
+        end
 
         def get_runner_id
           runner_id = build_env["runner_id"]
@@ -90,7 +101,7 @@ module Selective
             message = pipe.read
             response = JSON.parse(message, symbolize_names: true)
 
-            @logger.info("Received Command: #{response}")
+            logger.info("Received Command: #{response}")
             break if handle_command(response) == :break
           end
         end
@@ -140,6 +151,13 @@ module Selective
               "framework" => runner.framework,
               "framework_version" => runner.framework_version,
               "framework_wrapper_version" => runner.wrapper_version,
+              "runtime_version" => RUBY_VERSION,
+              # "record", "select" or "0": whether this runner can record a
+              # test map, only run selected subsets, or neither.
+              "test_map" => TestMap.capability,
+              # Forces this run to record (e.g. a nightly full run), however
+              # fresh the current map is.
+              "test_map_record" => ENV["SELECTIVE_TEST_MAP_RECORD"].to_s
             }.merge(metadata: metadata.to_json)
           end
         end
@@ -271,14 +289,33 @@ module Selective
 
         def handle_test_manifest(_data)
           self.class.restore_reporting!
-          @logger.info("Sending Response: test_manifest")
+          logger.info("Sending Response: test_manifest")
           data = {test_cases: runner.manifest["examples"] || runner.manifest["test_cases"]}
+          if TestMap.tree_requested? && (tree = test_map_tree)
+            data[:test_map_tree] = tree
+          end
           num_commits = build_env["num_commits"] || 1000
           if (diff = get_diff(num_commits))
             data[:modified_test_files] = modified_test_files(diff)
             data[:correlated_files] = correlated_files(diff, num_commits)
           end
           write({type: "test_manifest", data: data})
+        end
+
+        # Sent by servers that support test maps, before any tests are
+        # assigned. `tree: true` asks for a file-hash snapshot with the
+        # manifest; `record: true` turns on tracing for every test this runner
+        # executes.
+        def handle_configure_test_map(data)
+          recorder = TestMap.configure(
+            record: data[:record] == true,
+            tree: data[:tree] == true,
+            allocations: data[:allocations] != false
+          )
+          logger.info("Test map configured: record=#{!recorder.nil?} tree=#{TestMap.tree_requested?}")
+          if data[:record] == true && recorder.nil?
+            print_warning("Selective asked this runner to record a test map, but the native tracer isn't available. Tests will run normally.")
+          end
         end
 
         def handle_run_test_cases(data)
@@ -307,6 +344,8 @@ module Selective
             runner.finish unless exit_status.is_a?(Integer)
           end
 
+          upload_test_map
+
           kill_transport
           pipe.delete_pipes
           exit(exit_status || runner.exit_status)
@@ -315,12 +354,40 @@ module Selective
           :break
         end
 
+        def test_map_tree
+          TestMap::Tree.snapshot
+        rescue => e
+          logger.warn("Could not snapshot the repository for test selection: #{e.message}")
+          nil
+        end
+
+        def upload_test_map
+          recorder = TestMap.recorder
+          return if recorder.nil? || recorder.empty?
+
+          uploader = TestMap::Uploader.new(
+            host: build_env["host"],
+            api_key: build_env["api_key"],
+            run_id: build_env["run_id"],
+            run_attempt: build_env["run_attempt"],
+            runner_id: runner_id,
+            logger: logger
+          )
+          if uploader.upload(recorder.to_h)
+            logger.info("Uploaded test map fragment: #{recorder.test_count} tests")
+          else
+            print_warning("Selective could not upload this runner's test map (#{uploader.last_error&.message}). Its tests will run on the next build rather than be skipped.")
+          end
+        rescue => e
+          logger.warn("Test map upload failed: #{e.class}: #{e.message}")
+        end
+
         def correlated_files(diff, num_commits)
           Selective::Ruby::Core::FileCorrelator.new(diff, num_commits, build_env["target_branch"]).correlate
         end
 
         def test_case_callback(test_case)
-          @logger.info("Sending Response: test_case_result: #{test_case[:id]}")
+          logger.info("Sending Response: test_case_result: #{test_case[:id]}")
           write({type: "test_case_result", data: test_case})
         end
 
