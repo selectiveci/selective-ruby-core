@@ -2,9 +2,12 @@
 
 # The tracer is optional. A customer without a C toolchain (or on an
 # unsupported Ruby) must still be able to install selective-ruby-core and run
-# their suite exactly as before, so a failed configure step writes a no-op
-# Makefile instead of failing `gem install`. At runtime the missing library
-# simply means "this runner can't record a test map".
+# their suite exactly as before, so any failed check writes a no-op Makefile
+# instead of failing `gem install`. That includes compiling the tracer itself
+# here first: an error in `make` would fail the install, so a Ruby whose
+# headers the source doesn't build against must be caught before it. At
+# runtime the missing library simply means "this runner can't record a test
+# map".
 
 require "mkmf"
 
@@ -27,7 +30,11 @@ begin
     write_noop_makefile("required VM hook APIs are missing")
   else
     $CFLAGS << " -O2 -std=c99 -Wall -Wno-unused-parameter" # standard:disable Style/GlobalVars -- mkmf's interface
-    create_makefile("selective_tracer")
+    if try_compile(File.read(File.expand_path("selective_tracer.c", __dir__)))
+      create_makefile("selective_tracer")
+    else
+      write_noop_makefile("the tracer does not compile on Ruby #{RUBY_VERSION}; see mkmf.log")
+    end
   end
 rescue => e
   write_noop_makefile(e.message)
