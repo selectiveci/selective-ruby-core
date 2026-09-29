@@ -17,9 +17,11 @@ automatically. There's nothing to configure in the project:
   files changed.
 
 Recording uses the optional `selective_tracer` native extension, which is
-built when the gem is installed. If it can't be built (no C compiler, or an
-unsupported Ruby), installation still succeeds and the runner can still run
-selected subsets; it just can't record. To build it for development:
+built when the gem is installed, so installing the gem needs `make` (as any
+gem with a native extension does). If the tracer itself can't be built (no
+C compiler, an unsupported Ruby, or a compile error), installation still
+succeeds and the runner can still run selected subsets; it just can't
+record. To build it for development:
 
 ```bash
 bundle exec rake compile
