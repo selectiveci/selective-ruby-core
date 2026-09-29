@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+## [0.2.11] - 2026-09-29
+- Fix a runner that lost its connection once exiting 1 although every test passed. The reconnected session ran inside the rescue of the lost connection, so `$!` was still set when the framework's `after_run` hooks ran, and SimpleCov's treated that as a crashed run. Retries now loop, with `$!` cleared.
+
 ## [0.2.10] - 2026-09-29
 - Add test maps for test selection. When a suite enables selection, the server asks runners for a content-hash snapshot of the repository (`git ls-tree`, plus hashes of uncommitted edits to tracked files) with the manifest, and on recording runs each test is traced and a fragment uploaded to `/test_maps/fragments` after the run closes. Runners advertise `test_map=record|select|0`.
 - Add the optional `selective_tracer` native extension: global line/call/block and allocation hooks that record the project files each test executes, on every thread. Without it (no compiler, unsupported Ruby) the runner can still run selected subsets but can't record.

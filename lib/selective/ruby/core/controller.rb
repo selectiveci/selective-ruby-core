@@ -29,15 +29,19 @@ module Selective
           @retries = 0
         end
 
+        # A lost connection is retried by looping here, not by calling start
+        # again from inside the rescue clause. Everything a reconnected runner
+        # does -- the rest of the run, the close, the framework's after_run
+        # hooks -- would otherwise run inside that clause, where `$!` is still
+        # the ConnectionLostError. SimpleCov's after_run hook reads that as the
+        # run having crashed and exits 1, so every CI shard whose connection
+        # dropped once failed with no failing test.
         def start(reconnect: false)
-          @pipe = NamedPipe.new("/tmp/#{runner_id}_2", "/tmp/#{runner_id}_1")
-          @transport_pid = spawn_transport_process(reconnect: reconnect)
+          loop do
+            break if connect_and_run(reconnect: reconnect)
 
-          handle_termination_signals(transport_pid)
-          wait_for_connectivity
-          run_main_loop
-        rescue ConnectionLostError
-          retry!
+            reconnect = true
+          end
         rescue => e
           with_error_handling { raise e }
         end
@@ -106,7 +110,22 @@ module Selective
           end
         end
 
-        def retry!
+        # One connection: true when the run finished on it, false when it was
+        # lost and the caller should reconnect.
+        def connect_and_run(reconnect:)
+          @pipe = NamedPipe.new("/tmp/#{runner_id}_2", "/tmp/#{runner_id}_1")
+          @transport_pid = spawn_transport_process(reconnect: reconnect)
+
+          handle_termination_signals(transport_pid)
+          wait_for_connectivity
+          run_main_loop
+          true
+        rescue ConnectionLostError
+          prepare_retry!
+          false
+        end
+
+        def prepare_retry!
           @retries += 1
 
           with_error_handling { raise "Too many retries" } if retries > 10
@@ -116,7 +135,6 @@ module Selective
           kill_transport
 
           pipe.reset!
-          start(reconnect: true)
         end
 
         def write(data)

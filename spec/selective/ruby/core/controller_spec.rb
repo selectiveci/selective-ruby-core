@@ -68,25 +68,63 @@ RSpec.describe Selective::Ruby::Core::Controller do
 
     context "when a ConnectionLostError occurs" do
       before do
-        allow(Selective::Ruby::Core::NamedPipe).to receive(:new).and_raise(Selective::Ruby::Core::ConnectionLostError)
+        allow(controller).to receive(:puts)
+        allow(controller).to receive(:sleep)
+        allow(pipe).to receive(:reset!)
+      end
 
-        # The retry method calls start again, so we have to do some fancy mocking
-        # to ensure we do not end up in an endless loop. Normally the process would
-        # exit when the retires are exausted, but we're mocking exit above because
-        # we don't want to actually exit the test process.
-        allow(controller).to receive(:start).and_wrap_original do |original_method, *args, &block|
-          allow(controller).to receive(:start)
+      # Loses the first connection, then runs `commands` (and a close) on the
+      # second. Returns how many connections were attempted.
+      def lose_connection_once(controller, commands = [])
+        attempts = 0
+        allow(Selective::Ruby::Core::NamedPipe).to receive(:new).and_call_original
+        allow(Selective::Ruby::Core::NamedPipe).to receive(:new)
+          .with("/tmp/#{controller.runner_id}_2", "/tmp/#{controller.runner_id}_1") do
+            attempts += 1
+            raise Selective::Ruby::Core::ConnectionLostError if attempts == 1
+            pipe
+          end
+        # The first attempt fails before a pipe exists; retrying resets the
+        # (mocked) one.
+        allow(controller).to receive(:pipe).and_return(pipe)
+
+        allow(controller).to receive(:run_main_loop).and_wrap_original do |original_method, *args, &block|
+          sleep(0.1) # NamedPipe opens its ends in threads
+          (commands | [{command: "close"}]).each { |command| reverse_pipe.write(command.to_json) }
           original_method.call(*args, &block)
         end
 
-        allow(controller).to receive(:puts)
-        expect(controller).to receive(:sleep)
-        expect(controller).to receive(:kill_transport)
-        expect(controller).to receive_message_chain(:pipe, :reset!)
+        controller.start
+        attempts
       end
 
-      it "increments the retries counter" do
-        expect { controller.start }.to change { controller.retries }.by(1)
+      it "reconnects and increments the retries counter" do
+        expect(lose_connection_once(controller)).to eq(2)
+        expect(controller.retries).to eq(1)
+        expect(Process).to have_received(:spawn).with(anything, /reconnect=true/, anything)
+        expect(runner).to have_received(:finish).once
+      end
+
+      # SimpleCov's after_run hook exits 1 when `$!` holds an exception, so a
+      # reconnected runner must not finish inside the rescue of the lost one.
+      it "finishes the reconnected run with no pending exception" do
+        seen = :not_called
+        allow(runner).to receive(:finish) { seen = $! }
+
+        lose_connection_once(controller)
+
+        expect(seen).to be_nil
+        expect(controller).to have_received(:exit).with(1) # the double's exit_status
+      end
+
+      it "gives up after too many retries" do
+        allow(Selective::Ruby::Core::NamedPipe).to receive(:new).and_raise(Selective::Ruby::Core::ConnectionLostError)
+        allow(controller).to receive(:pipe).and_return(pipe)
+        allow(controller).to receive(:puts_indented)
+        allow(controller).to receive(:exit).with(1).and_raise(SystemExit.new(1))
+
+        expect { controller.start }.to raise_error(SystemExit)
+        expect(controller.retries).to eq(11)
       end
     end
 
