@@ -1,6 +1,8 @@
 ## [Unreleased]
+
+## [0.2.10] - 2026-09-29
 - Add test maps for test selection. When a suite enables selection, the server asks runners for a content-hash snapshot of the repository (`git ls-tree`, plus hashes of uncommitted edits to tracked files) with the manifest, and on recording runs each test is traced and a fragment uploaded to `/test_maps/fragments` after the run closes. Runners advertise `test_map=record|select|0`.
-- Add the optional `selective_tracer` native extension: global line/call/block and allocation hooks that record the project files each test executes, on every thread. Installation never fails because of it; without a compiler the runner can still run selected subsets but can't record.
+- Add the optional `selective_tracer` native extension: global line/call/block and allocation hooks that record the project files each test executes, on every thread. Without it (no compiler, unsupported Ruby) the runner can still run selected subsets but can't record.
 - Add `SELECTIVE_TEST_MAP_RECORD=1` (force this run to record a map) and `SELECTIVE_TEST_MAP_DISABLE=1` (take no part in selection), plus `SELECTIVE_TEST_MAP_IGNORE` (extra comma-separated directories the tracer ignores).
 - Test map fragments are uploaded from a child Ruby process without Bundler's environment, so WebMock, VCR and other HTTP stubs loaded by the suite can't block the upload.
 - Installing the gem now needs `make`, since it carries a native extension. The tracer is compiled once while configuring, and any failure there (no C compiler, unsupported Ruby, compile error) installs without it rather than failing the install.
