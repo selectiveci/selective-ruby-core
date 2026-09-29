@@ -13,3 +13,6 @@
 
 Gemfile.lock
 lib/bin/transport
+# Native tracer build output
+/lib/*.so
+/lib/*.bundle

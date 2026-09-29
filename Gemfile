@@ -19,7 +19,7 @@ gem "appraisal", "~> 2.5"
 
 gem "simplecov", require: false, group: :test
 
-if Dir.exist?(selective_ruby_rspec_path = "../selective-ruby-rspec")
+if Dir.exist?(selective_ruby_rspec_path = File.expand_path("../selective-ruby-rspec", __dir__))
   gem "selective-ruby-rspec", path: selective_ruby_rspec_path
 else
   gem "selective-ruby-rspec", git: "https://github.com/selectiveci/selective-ruby-rspec.git"
