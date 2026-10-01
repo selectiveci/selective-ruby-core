@@ -138,7 +138,38 @@ module Selective
         end
 
         def write(data)
-          pipe.write JSON.dump(data)
+          pipe.write JSON.dump(sanitize_payload(data))
+        end
+
+        # JSON.dump raises Encoding::UndefinedConversionError on bytes that are
+        # not valid UTF-8. That exception unwinds out of the test_case_result
+        # callback, through run_main_loop, and terminates the whole runner —
+        # every result for the run is lost, not just the offending one.
+        #
+        # Any test that asserts on binary data can produce this: a fixture read
+        # with File.binread, a protocol frame, a truncated multibyte sequence.
+        # Scrub on the way out so a hostile payload costs at most the fidelity
+        # of one failure message.
+        #
+        # NUL is stripped for a different reason: it survives JSON encoding but
+        # Postgres refuses it in a jsonb value (22P05), so it would fail on the
+        # server instead.
+        def sanitize_payload(value)
+          case value
+          when String then sanitize_payload_string(value)
+          when Array then value.map { |v| sanitize_payload(v) }
+          when Hash then value.to_h { |k, v| [sanitize_payload(k), sanitize_payload(v)] }
+          else value
+          end
+        end
+
+        def sanitize_payload_string(string)
+          result = string
+          result = result.dup.force_encoding(Encoding::UTF_8) unless result.encoding == Encoding::UTF_8
+          result = result.scrub("�") unless result.valid_encoding?
+          # Block form: a string replacement would treat backslashes as escapes.
+          result = result.gsub("\u0000") { "\\u0000" } if result.include?("\u0000")
+          result
         end
 
         def generate_runner_id
