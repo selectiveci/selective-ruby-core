@@ -256,10 +256,8 @@ module Selective
         def handle_termination_signals(pid)
           ["INT", "TERM"].each do |signal|
             Signal.trap(signal) do
-              # :nocov:
               kill_transport(signal: signal)
-              exit
-              # :nocov:
+              exit(runner.exit_status)
             end
           end
         end
