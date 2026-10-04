@@ -2,6 +2,7 @@ name: Multi Ruby Matrix
 
 on:
   workflow_dispatch:
+  pull_request:
 
 jobs:
   multi-ruby-rspec:
@@ -17,8 +18,7 @@ jobs:
           - "3.2"
           - "3.3"
           - "3.4"
-          - "4.0"
-          - "head"
+          - "4.0.7"
         runners: [1, 2]
 
     env:

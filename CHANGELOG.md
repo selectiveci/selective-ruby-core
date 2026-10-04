@@ -1,4 +1,5 @@
 ## [Unreleased]
+- **Breaking:** drop Ruby 2.6 support. `required_ruby_version` is now `>= 2.7.0`, and CI tests every Ruby from 2.7 through 4.0.7 on pull requests.
 
 ## [0.2.11] - 2026-09-29
 - Fix a runner that lost its connection once exiting 1 although every test passed. The reconnected session ran inside the rescue of the lost connection, so `$!` was still set when the framework's `after_run` hooks ran, and SimpleCov's treated that as a crashed run. Retries now loop, with `$!` cleared.
