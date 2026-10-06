@@ -1,4 +1,4 @@
-## [Unreleased]
+## [0.2.12] - 2026-10-06
 - Fix a runner that ran failing tests exiting 0 when it was sent SIGTERM or SIGINT. The signal handler exited with a bare `exit`; it now exits with the framework's result for the tests this runner has run (non-zero if any failed, 0 otherwise), the same `exit_status` a normal close uses. Tests it had not finished are reassigned to other runners by the server.
 
 ## [0.2.11] - 2026-09-29
