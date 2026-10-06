@@ -153,6 +153,56 @@ RSpec.describe Selective::Ruby::Core::Controller do
     end
   end
 
+  describe "termination signals" do
+    let(:traps) { {} }
+    let(:test_cases_run) { [] }
+
+    before do
+      allow(controller).to receive(:handle_termination_signals).and_call_original
+      allow(controller).to receive(:exit).and_call_original
+      allow(Signal).to receive(:trap) { |signal, &handler| traps[signal] = handler }
+      allow(runner).to receive(:run_test_cases) { |ids| test_cases_run.concat(ids) }
+      allow(runner).to receive(:exit_status) { test_cases_run.grep(/\Afailing/).any? ? 1 : 0 }
+      controller.handle_termination_signals(123)
+    end
+
+    def run_test_cases(*ids)
+      controller.handle_run_test_cases({test_case_ids: ids})
+    end
+
+    def exit_status_on(signal)
+      traps.fetch(signal).call
+      :did_not_exit
+    rescue SystemExit => e
+      e.status
+    end
+
+    it "exits 1 on TERM after the runner ran a failing test" do
+      run_test_cases("passing_spec.rb[1:1]", "failing_spec.rb[1:1]")
+
+      expect(exit_status_on("TERM")).to eq(1)
+      expect(controller).to have_received(:kill_transport).with(signal: "TERM").ordered
+      expect(controller).to have_received(:exit).ordered
+    end
+
+    it "exits 0 on TERM when every test the runner ran passed" do
+      run_test_cases("passing_spec.rb[1:1]", "passing_spec.rb[1:2]")
+
+      expect(exit_status_on("TERM")).to eq(0)
+    end
+
+    it "exits 0 on TERM before the runner has run a test" do
+      expect(exit_status_on("TERM")).to eq(0)
+    end
+
+    it "exits 1 on INT after the runner ran a failing test" do
+      run_test_cases("failing_spec.rb[1:1]")
+
+      expect(exit_status_on("INT")).to eq(1)
+      expect(controller).to have_received(:kill_transport).with(signal: "INT")
+    end
+  end
+
   describe "exec" do
     context "when an error occurs" do
       before do
