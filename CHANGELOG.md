@@ -1,4 +1,4 @@
-## [Unreleased]
+## [0.2.13] - 2026-10-08
 - **Breaking:** drop Ruby 2.6 support. `required_ruby_version` is now `>= 2.7.0`, and CI tests every Ruby from 2.7 through 4.0.7 on pull requests.
 
 ## [0.2.12] - 2026-10-06
