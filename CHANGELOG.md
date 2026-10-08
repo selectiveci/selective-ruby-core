@@ -1,3 +1,6 @@
+## [Unreleased]
+- **Breaking:** drop Ruby 2.6 support. `required_ruby_version` is now `>= 2.7.0`, and CI tests every Ruby from 2.7 through 4.0.7 on pull requests.
+
 ## [0.2.12] - 2026-10-06
 - Fix a runner that ran failing tests exiting 0 when it was sent SIGTERM or SIGINT. The signal handler exited with a bare `exit`; it now exits with the framework's result for the tests this runner has run (non-zero if any failed, 0 otherwise), the same `exit_status` a normal close uses. Tests it had not finished are reassigned to other runners by the server.
 

@@ -3,7 +3,25 @@
 RSpec.describe Selective::Ruby::Core::Controller do
   let(:runner_class) { class_double("runner_class", new: runner) }
   let(:runner) { double("runner", finish: nil, exit_status: 1, framework: 'rspec', framework_version: "1.0", wrapper_version: "1.0") }
-  let(:controller) { dirty_dirty_unprivate_class(described_class).new(runner_class, nil) }
+  let(:build_env) do
+    {
+      "host" => "wss://app.selective.ci",
+      "api_key" => "test-api-key",
+      "platform" => "github_actions",
+      "run_id" => "1",
+      "run_attempt" => "1",
+      "runner_id" => "",
+      "branch" => "main",
+      "sha" => "abc123",
+      "git_repo_full_name" => "selectiveci/selective-ruby-core",
+      "git_provider" => "github"
+    }
+  end
+  let(:controller) do
+    dirty_dirty_unprivate_class(described_class).new(runner_class, nil).tap do |controller|
+      allow(controller).to receive(:build_env).and_return(build_env)
+    end
+  end
 
   let!(:pipe) { Selective::Ruby::Core::NamedPipe.new("/tmp/#{controller.runner_id}_test_2", "/tmp/#{controller.runner_id}_test_1", skip_reset: true) }
   let!(:reverse_pipe) { Selective::Ruby::Core::NamedPipe.new("/tmp/#{controller.runner_id}_test_1", "/tmp/#{controller.runner_id}_test_2", skip_reset: true) }
