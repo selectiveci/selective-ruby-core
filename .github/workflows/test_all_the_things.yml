@@ -2,6 +2,11 @@ name: Multi Ruby Matrix
 
 on:
   workflow_dispatch:
+    inputs:
+      without_selective:
+        description: Run plain rspec, as a fork PR without secrets would
+        type: boolean
+        default: false
   pull_request:
 
 jobs:
@@ -42,15 +47,36 @@ jobs:
         shell: bash
         env:
           SELECTIVE_TEST_MAP_DISABLE: "1"
-        run: bundle exec selective rspec 2>&1 | tee selective-output.log
+          WITHOUT_SELECTIVE: ${{ inputs.without_selective || secrets.SELECTIVE_API_KEY == '' }}
+          RUNNER: ${{ matrix.runners }}
+        run: |
+          if [[ "$WITHOUT_SELECTIVE" != "true" ]]; then
+            echo selective > run-mode
+            bundle exec selective rspec 2>&1 | tee selective-output.log
+          elif [[ "$RUNNER" == "1" ]]; then
+            echo plain > run-mode
+            env -u SELECTIVE_API_KEY bundle exec rspec 2>&1 | tee selective-output.log
+          else
+            echo idle > run-mode
+            echo "No Selective: runner 1 runs the whole suite with plain rspec" | tee selective-output.log
+          fi
 
       - name: Record this runner's example count
         shell: bash
         run: |
           mkdir -p example-counts
-          ran=$(.github/scripts/runner_example_count selective-output.log)
+          mode=$(cat run-mode)
           suite=$(bundle exec rspec --dry-run 2>/dev/null | .github/scripts/runner_example_count /dev/stdin)
-          echo "ran $ran of a $suite-example suite"
+          if [[ "$mode" == "idle" ]]; then
+            ran=0
+          else
+            ran=$(.github/scripts/runner_example_count selective-output.log)
+          fi
+          echo "$mode: ran $ran of a $suite-example suite"
+          if [[ "$mode" == "plain" && "$ran" != "$suite" ]]; then
+            echo "plain rspec must run the whole suite" >&2
+            exit 1
+          fi
           echo "$ran $suite" > "example-counts/${{ matrix.ruby }}-${{ matrix.runners }}.txt"
 
       - uses: actions/upload-artifact@v7
