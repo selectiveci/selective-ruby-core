@@ -1,3 +1,6 @@
+## [0.2.14] - 2026-10-09
+- Tell the server when a runner is stopped by SIGTERM or SIGINT. Before exiting, the runner sends a `terminating` message naming the signal, so a run whose runners all leave this way is recorded as cancelled rather than as runners lost, and is shown and counted that way. Servers that predate the message ignore it. The runner waits 0.25s after sending so the transport can deliver it before exiting.
+
 ## [0.2.13] - 2026-10-08
 - **Breaking:** drop Ruby 2.6 support. `required_ruby_version` is now `>= 2.7.0`, and CI tests every Ruby from 2.7 through 4.0.7 on pull requests.
 
