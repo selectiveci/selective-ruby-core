@@ -10,6 +10,8 @@ module Selective
         @@selective_suppress_reporting = false
         @@report_at_finish = {}
 
+        TERMINATION_REPORT_GRACE = 0.25
+
         REQUIRED_CONFIGURATION = {
           "host" => "SELECTIVE_HOST",
           "api_key" => "SELECTIVE_API_KEY",
@@ -256,10 +258,28 @@ module Selective
         def handle_termination_signals(pid)
           ["INT", "TERM"].each do |signal|
             Signal.trap(signal) do
+              report_termination(signal)
               kill_transport(signal: signal)
               exit(runner.exit_status)
             end
           end
+        end
+
+        # Tells the server this runner is being stopped on purpose, so a run
+        # whose runners all leave this way is recorded as cancelled rather
+        # than as runners lost. Best effort: a server that predates the
+        # message ignores it, and a dead pipe just means it isn't sent.
+        #
+        # The transport exits the moment it reads "exit", without draining
+        # what it has queued for the socket, so give it a moment to send this
+        # first. CI cancellations allow several seconds between TERM and KILL.
+        def report_termination(signal)
+          return unless pipe
+
+          write({type: "terminating", data: {signal: signal}})
+          sleep(TERMINATION_REPORT_GRACE)
+        rescue ConnectionLostError, IOError, SystemCallError
+          # Nothing to report to.
         end
 
         def kill_transport(signal: "TERM")

@@ -219,6 +219,29 @@ RSpec.describe Selective::Ruby::Core::Controller do
       expect(exit_status_on("INT")).to eq(1)
       expect(controller).to have_received(:kill_transport).with(signal: "INT")
     end
+    context "with a connected pipe" do
+      before do
+        allow(controller).to receive(:pipe).and_return(pipe)
+        allow(controller).to receive(:sleep)
+      end
+
+      it "tells the server which signal stopped it before killing the transport" do
+        allow(pipe).to receive(:write)
+
+        exit_status_on("TERM")
+
+        expect(pipe).to have_received(:write)
+          .with(JSON.dump({type: "terminating", data: {signal: "TERM"}})).ordered
+        expect(controller).to have_received(:kill_transport).with(signal: "TERM").ordered
+      end
+
+      it "still exits when the pipe is already gone" do
+        allow(pipe).to receive(:write).and_raise(Selective::Ruby::Core::ConnectionLostError)
+
+        expect(exit_status_on("INT")).to eq(0)
+        expect(controller).to have_received(:kill_transport).with(signal: "INT")
+      end
+    end
   end
 
   describe "exec" do
