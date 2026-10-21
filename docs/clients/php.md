@@ -2,9 +2,9 @@
 
 Marketing order: third. Feasibility of full parity: third. PHPUnit is the base. Pest runs on top of PHPUnit, so the Pest package is a bootstrap on the PHPUnit client, not a second session loop. ParaTest and `pest --parallel` are local process pools. `pest --dirty` is changed files. Both are outside the parity bar.
 
-Read [SPEC.md](SPEC.md) for the wire contract and the parity bar. PHPUnit is the first framework. Pest compiles down to PHPUnit tests, so it is a bootstrap on this client after PHPUnit conformance is green, not a second session loop.
+Read [SPEC.md](SPEC.md) for the wire contract and the parity bar.
 
-**Verdict: proven for the split, feasible with risk on data-provider construction across PHPUnit majors.** `TestSuite` plus a `TestCase` for one method is the API IDEs and ParaTest already drive. No row is blocked. No fork. PHPUnit's draft parallel worker (PR 6784) is an existence proof of a process that boots once and runs many tests; its scheduler hands out classes, and ours hands out methods, so we do not adopt that scheduler.
+**Verdict: feasible with risk.** PHPUnit 10 through 13 have no `TestResult`. `TestSuite::run()` returns void, and the result facade is a process-global collector with no reset. One failure latches `stopOnFailure` / `stopOnDefect`, and the next `run()` is `ExecutionAborted`. The client calls `TestSuite::run()`, an Extension subscriber writes the client's own per-id store, retries replace entries there, and the exit status reads that store. `stopOnFailure` and `stopOnDefect` are forced off for the session, the way RSpec clears `wants_to_quit`. No row is blocked. No fork. PHPUnit's draft parallel worker (PR 6784, content now at `4c649e05`; `52db4ed` is unreachable after the rebase) is an existence proof of a process that boots once and runs many tests. Its scheduler hands out classes, and ours hands out methods, so we do not adopt that scheduler. `TestSuite` is `@internal` on 10+.
 
 ## Parity
 
@@ -12,11 +12,11 @@ Rows P4, P10–P14, P16, P19, P23–P27, and P29–P31 are the session loop on `
 
 | Id | Mechanism | Rating |
 |---|---|---|
-| P1 | One PHP process. Boot through PHPUnit's configuration and bootstrap once. For each assigned id, build a `PHPUnit\Framework\TestSuite`, `addTest` a `TestCase` constructed as `new ClassName('methodName')`, and `TestSuite::run` on a `TestResult`. The Laravel application stays booted. Do not spawn a PHPUnit process per batch (that is ParaTest's chunk model). | proven |
-| P2 | `Class::method`, and `Class::method#dataset` when there is a data set. That is the id PHPUnit's `--list-tests` prints, and it survives a line shift. | proven |
-| P3 | `--list-tests-xml` (or the suite built and not run) for discovery. Bodies have not run. Empty list exits 1. Data-provider cases are built with `setData` on the public `TestCase`. `TestBuilder` is internal and has moved in 10, 11, 12, and 13; stay off it. Providers must be deterministic, because they execute at build time; cache the built cases. | feasible with risk |
-| P5–P7, P20 | `TestResult` errors and failures map to `failed`, skipped and incomplete to `pending`, the rest to `passed`. Project frame first. Exit 1 only for a remaining error or failure. | proven |
-| P8, P9 | `TestResult` accumulates. Clear the earlier result for that id before the rerun, or run the retry on a fresh `TestResult` and merge. `remove_failed` matches class, method, and data-set name. | proven |
+| P1 | One PHP process. Boot through PHPUnit's configuration and bootstrap once. For each assigned id, build a `PHPUnit\Framework\TestSuite`, `addTest` a `TestCase` constructed as `new ClassName('methodName')`, and call `TestSuite::run()`. There is no `TestResult` argument on 10, 11, 12, or 13. The Laravel application stays booted. Do not spawn a PHPUnit process per batch (that is ParaTest's chunk model). Force `stopOnFailure` and `stopOnDefect` off before the session. | feasible with risk |
+| P2 | `Class::method`, and the data-set id from `--list-tests-xml` (`Class::method#dataset`). Text-mode `--list-tests` prints `Class::method"name"` for a named data set. Prefer the XML id. It survives a line shift. | proven |
+| P3 | `--list-tests-xml` (or the suite built and not run) for discovery. Bodies have not run. Empty list exits 1. Data-provider cases are built with `setData` on the public `TestCase`. `TestBuilder` stayed in `PHPUnit\Framework` from 9.6 through 13.4. What changed is its signature, not its namespace. Stay off it anyway. Providers must be deterministic, because they execute at build time; cache the built cases. | feasible with risk |
+| P5–P7, P20 | An Extension subscriber writes the client's own per-id store. The process-global facade is not the store: it has no reset, and one failure stays latched. Errors and failures map to `failed`, skipped and incomplete to `pending`, the rest to `passed`. Project frame first. Exit 1 only for a remaining error or failure in that store. | feasible with risk |
+| P8, P9 | Retries replace the entry in the client's per-id store. The facade still counts a failure the retry replaced, so exit status does not read the facade. `remove_failed` matches class, method, and data-set name. | feasible with risk |
 | P15, P16 | One test per `TestSuite::run` re-enters `#[BeforeClass]` / `setUpBeforeClass`, which is the RSpec `:all` → `:each` rule. A suite of two methods from one class runs `BeforeClass` once and is short of parity. `BeforeClass` time goes to `seconds_in_*_all_hooks`. Suite bootstrap stays once (P14). | proven |
 | P17 | The bootstrap and the class files stay loaded. `require` runs once. | proven |
 | P18 | `phpunit.xml`, `--filter`, `--testsuite`, and `--group` bound discovery the way `vendor/bin/phpunit` would have. `selective exec phpunit` lists tests and does not open a socket. | proven |
@@ -25,7 +25,7 @@ Rows P4, P10–P14, P16, P19, P23–P27, and P29–P31 are the session loop on `
 | P28 | When `record: true` and the `pcov` extension is loaded, `SebastianBergmann\CodeCoverage` `start($id)` / `stop()` around the test, including `setUp` and `tearDown`. Ignore `vendor/` and `SELECTIVE_TEST_MAP_IGNORE`. Xdebug is slower; use it only when PCOV is absent and the user opted in. Advertise `select` when neither is loaded. Installing the package does not require PCOV. | proven |
 | P32 | The script is `vendor/bin/selective`. It does not call PHPUnit's `Application::run` in a way that executes and exits before the socket loop. Extensions from `phpunit.xml` still load. | proven |
 
-ParaTest's `WrapperRunner` (`--functional`) is the same shape: one worker, bootstrap once, one method at a time. PHPUnit PR 6784 (commit `52db4ed` on the draft, distribution unit is one class so `BeforeClass` stays once per class) shows the project itself now wants a persistent worker. Our unit is one method because of P15.
+ParaTest's `WrapperRunner` (`--functional`) is the same shape: one worker, bootstrap once, one method at a time. PHPUnit PR 6784 (the patch that was `52db4ed` is now `4c649e05`; distribution unit is one class so `BeforeClass` stays once per class) shows the project itself now wants a persistent worker. Our unit is one method because of P15. One method per `run()` is what re-enters `BeforeClass`.
 
 ## Binding
 
@@ -41,7 +41,7 @@ v1 targets: Linux gnu x86_64 and aarch64, macOS x86_64 and aarch64, plus musl on
 
 ## Discovery and running a subset
 
-PHPUnit extension subscribers observe a run. They do not pause it. `--filter` is fixed before `Application` starts. The client is the process: it builds a `TestSuite` of the assigned methods and calls `run` on the already-booted bootstrap.
+PHPUnit extension subscribers observe a run. They do not pause it, and they are how results reach the client's store, because `run()` returns void. `--filter` is fixed before `Application` starts. The client is the process: it builds a `TestSuite` of the assigned methods and calls `run()` on the already-booted bootstrap, with `stopOnFailure` and `stopOnDefect` off.
 
 Support PHPUnit 10 and later. CI runs 10, 11, 12, and 13. The file allowed to construct cases is the adapter's suite builder, and it uses `TestSuite::addTest` and `TestCase`, not `TestBuilder`.
 
