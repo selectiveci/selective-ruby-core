@@ -1,8 +1,31 @@
 # Python (pytest)
 
-Marketing order: second. pytest is the client to build. It also collects `unittest` tests, so one adapter covers Django and the stdlib runner. Django's own `manage.py test` runner is a later adapter if a design partner needs it.
+Marketing order: second. Feasibility of full parity: first. pytest is the client to build. It also collects `unittest` tests, so one adapter covers Django and the stdlib runner. Django's own `manage.py test` runner is a later adapter if a design partner needs it.
 
-Read [SPEC.md](SPEC.md) for the wire contract.
+Read [SPEC.md](SPEC.md) for the wire contract and the parity bar. pytest is the first framework in this language. Django's `manage.py test` runner is a later adapter if a design partner needs it; pytest already collects `unittest`.
+
+**Verdict: proven for the split.** The worker loop pytest-xdist already runs in production is the Selective loop with the controller removed. P15, re-entering module and class fixtures without tearing the session down, is feasible with risk because it goes through pytest's setup stack. No row is blocked. No fork.
+
+## Parity
+
+Rows P4, P10–P14, P16, P19, P23–P27, and P29–P31 are the session loop, on the PyO3 binding or `transport --stdio`. Port of `Controller`. Rating: proven.
+
+| Id | Mechanism | Rating |
+|---|---|---|
+| P1 | One pytest process. Collect once, replace `pytest_runtestloop`, and on each `run_test_cases` call `pytest_runtest_protocol` for those items. The process stays up, so session fixtures and Django setup stay warm. Do not register `pytest_xdist_make_scheduler`: the controller is the Selective server. Do not load `pytest-xdist -n` under this command, and do not shell `pytest nodeid` per batch. | proven |
+| P2 | Node id (`tests/test_billing.py::TestTax::test_round`). Plugins already key on it. It survives a line shift. | proven |
+| P3 | `session.items` after collection. `pytest --collect-only` in a subprocess is the Ruby dry-run if in-process collection disturbs plugins; prefer in-process. Empty items exit 1. | proven |
+| P5–P7, P20 | `pytest_runtest_makereport`. `skipped` maps to `pending`. Project frame first. Exit 1 only for a remaining `failed` call. | proven |
+| P8, P9 | Before a repeated id, drop the earlier report from junitxml and pytest-html. `remove_failed` deletes by node id. | proven |
+| P15, P16 | RSpec's `:all` → `:each` means module, class, and package fixtures run again for every assigned test. Session fixtures stay up (`before(:suite)`). `SetupState.teardown_exact(None)` tears the session stack down too, so the idle gap between batches must not pass `nextitem=None`. After each item, finish fixture defs whose scope is not `session` and leave the session stack. Time those re-entries for P16. Pin the pytest series in CI and assert a module fixture's setup count equals the number of assigned tests. | feasible with risk |
+| P17 | Collection loads modules once. The run loop does not re-import. | proven |
+| P18 | The Selective command accepts the same paths, `-k`, `-m`, and ini config pytest would have used. `selective exec pytest` collects and returns without a socket. | proven |
+| P21 | In-process concurrency (`pytest-xdist` workers, `pytest-parallel`) is off under this command so coverage contexts stay on one id. The server's batches are the parallelism. | proven |
+| P22 | Node ids that collide (importlib import mode, duplicate names) get a warning and a suffix so both items ship in the manifest. | proven |
+| P28 | coverage.py `Coverage(source=project, data_file=None)`. `switch_context(nodeid)` from `pytest_runtest_setup` through fixture teardown. Ignore `site-packages`, the virtualenv, and `SELECTIVE_TEST_MAP_IGNORE`. If pytest-cov already owns the singleton, use that instance. Advertise `record` when `coverage` imports. | proven |
+| P32 | The plugin owns `pytest_runtestloop`, so pytest does not run the suite during collection. | proven |
+
+xdist holds one item back so `nextitem` is the following test and fixture finalizers can see it. Between Selective batches the next id is unknown. Passing `nextitem=None` finalizes the whole stack, including session fixtures, which breaks P14. The P15 row is the precise teardown, and it is the only pytest row that touches a private object (`session._setupstate`). `FixtureDef.finish()` on the non-session defs cached for that item is the same operation.
 
 ## Binding
 
@@ -37,7 +60,7 @@ The Selective adapter is one pytest process that behaves like an xdist worker wh
 
 Do not shell `pytest nodeid` per batch. Django setup and a large conftest make that slower than the selection we are trying to buy.
 
-xdist's "keep one test queued so `nextitem` is set" detail matters for fixture finalizers. When the server has not yet sent the next id, pass `nextitem=None` for the last test of the batch. Finalizers still run; they just cannot see the following item. That matches a worker that is about to go idle.
+xdist keeps one item queued so `nextitem` is known. Copy that inside a batch. At the boundary between batches, finish module, class, and package fixtures and keep session fixtures (P15). `nextitem=None` is the end of the session, and it is the wrong signal while the process is still waiting for the server.
 
 ## Coverage (test map)
 
@@ -63,7 +86,8 @@ Subprocess tests (a Django `LiveServer` in another process, `multiprocessing`) a
 
 ## Risks
 
-- pytest's run loop is public, but plugins that wrap `pytest_runtest_protocol` assume they see every item in collection order. Holding the loop and running a subset surprises plugins that zip reports against `session.items`. Run conformance with pytest-django, pytest-xdist **not** loaded, and a junitxml plugin. Tell users to remove `-n` from the Selective command: xdist would schedule a second time inside a shard.
+- pytest's run loop is public, but plugins that wrap `pytest_runtest_protocol` assume they see every item in collection order. Holding the loop and running a subset surprises plugins that zip reports against `session.items`. Run conformance with pytest-django, pytest-xdist not loaded, and a junitxml plugin. Users take `-n` off the Selective command: xdist would schedule a second time inside a shard.
+- P15 finishes non-session fixtures through `SetupState`. That object is private. The conformance fixture (a module-scoped fixture that counts setups, and a session-scoped fixture that must stay at 1) is what locks the row. If a pytest release changes the stack, the pin fails CI.
 - Collection order can differ across processes when a plugin walks the filesystem in an unstable order. Node ids are the identity, so the set is what matters. The server asks one runner for the manifest (the first open socket) and the others only execute. Any shard can be that runner, including after a reconnect, so every process collects and caches the collection.
 - `coverage` plus pytest-cov double-start.
 - HTTP stubs swallowing the fragment upload. The Rust upload helper avoids that. Do not use `urllib` inside the test process.
@@ -71,7 +95,7 @@ Subprocess tests (a Django `LiveServer` in another process, `multiprocessing`) a
 
 ## Effort
 
-Medium. Three slices: PyO3 session (or sidecar first, extension in the same PR if it stays small) plus the pytest run-loop until conformance is green; coverage.py contexts and upload; cibuildwheel matrix including musl and Windows. The run loop is smaller than ExUnit's because the hooks are public. The wheel matrix is the part that looks like a project of its own; cibuildwheel is the whole answer, do not hand-roll images.
+Medium. Three slices: sidecar session plus the pytest run loop until conformance is green, including the module-fixture counter; coverage.py contexts and upload; cibuildwheel matrix including musl and Windows. The wheel matrix is the part that looks like a project of its own; cibuildwheel is the whole answer, do not hand-roll images.
 
 Ship the sidecar path first inside the Python repo so conformance does not wait on wheels, then turn the same Python session object onto the extension. One repository, `selectiveci/selective-python-pytest`.
 

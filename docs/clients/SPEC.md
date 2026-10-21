@@ -4,6 +4,55 @@ Status: design, October 2026. This is the contract a new language client impleme
 
 No new client opens its own WebSocket. The only WebSocket implementation is the Rust crate in `selectiveci/transport`. A client is a binding to that crate plus a thin test-framework adapter. See [Transport binding](#transport-binding).
 
+## Parity bar
+
+Every row in the matrix below is **required**. A repository that implements a subset is not a Selective client, and it does not ship. The server hands out test-case ids. The client runs exactly those ids, in a process that stays up (the application and the framework booted once), reports each result, and waits for the next batch. Retries of an id run again in that same process and replace the earlier local result. Group hooks the author wrote as once-per-group run again for every assigned test, including a later batch in the same process. The test-map fragment, when recording is on, covers setup, the body, and teardown of each id.
+
+These are outside the contract. They are not a first version and they are not a fallback:
+
+- A manifest whose id is a file path.
+- A static split computed at launch: `jest --shard`, `vitest --shard`, `mix test --partitions`, pytest-split, ParaTest or `pest --parallel` as the scheduler, Knapsack Pro's `runCLI` per batch, `mvn -Dtest=` or Gradle `--tests` per batch.
+- A mode that runs whole files when per-test execution is inconvenient.
+
+The citations are the code that ships. `selective-ruby-core` is this repository. `selective-ruby-rspec` and `selective-ruby-minitest` are the adapters. Language notes map each id to a mechanism and a rating: proven, feasible with risk, or blocked.
+
+| Id | Required behavior | Where Ruby does it |
+|---|---|---|
+| P1 | Stay in one process. Wait for `run_test_cases`, run those ids, report, wait for more. An id the process already ran is run again. | `Controller#run_main_loop`, `#handle_run_test_cases`. `Selective::Ruby::RSpec::RunnerWrapper#run_test_cases` (`rspec_runner.run_specs`). `Selective::Ruby::Minitest::RunnerWrapper#run_test_cases` (`run_one_method` or `Runnable.run`). |
+| P2 | The id is stable across a line shift and is byte-for-byte the same on the manifest, the assignment, and the result. The server does not sanitize it. | RSpec `example.id` in `RunnerWrapper#format_example`. Minitest `file_path` plus `MD5(Class#method)` in `RunnerWrapper#configure`. |
+| P3 | Discover every test the command would have run, without executing bodies. An empty suite prints why and exits 1. | RSpec `RunnerWrapper#manifest`: `selective exec rspec --format=json --dry-run`, `TestManifestError` when `examples` is empty. Minitest loads the files once and enumerates `runnable_methods`; empty `test_ids` raises `TestManifestError`. |
+| P4 | The server asks one connected runner. Every shard must be able to answer, including after a reconnect, so collection is cached in the process. | `Controller#handle_test_manifest`. |
+| P5 | Send `test_case_result` as each test finishes, during the batch. | `Controller#test_case_callback`. RSpec `Formatter` on `example_passed`, `example_failed`, `example_pending`, calling `report_example`. Minitest calls the callback inside `run_test_cases` after each method. |
+| P6 | Status is `passed`, `failed`, or `pending`. `passed` and `pending` count as a pass. A skip of a test the server assigned is `pending`. Unassigned tests are not reported. | RSpec `execution_result.status`. Minitest `format_test_case`: `skipped?` becomes `pending`. |
+| P7 | On failure, send `failure_message_lines` and `failure_formatted_backtrace`. The first frame is a repo-relative project frame, because the server's systemic-failure filter only strips Ruby library paths. Strip NUL bytes from descriptions and failure text. | RSpec `failure_formatter` (`ExceptionPresenter`). Minitest `format_test_case` (`failure.to_s`, `failure.failures.first.backtrace`). |
+| P8 | A retry that lands on the same runner replaces the earlier attempt in local reporters, statistic counters, and the exit status. The server does not send `remove_failed_test_case_result` in that case; deleting the result would erase the attempt that just failed. | RSpec `Reporter#example_started` deletes the example from `@examples`, `@failed_examples`, and `@pending_examples` when `started_at` is already set. Minitest `discard_previous_results` and `forget_statistics` (JUnit XML and `count` / `assertions`). |
+| P9 | `remove_failed_test_case_result` from a different runner drops that failure so a later exit can be 0. The match is the precise test. An unknown id is ignored. | `Controller#handle_remove_failed_test_case_result`. RSpec `remove_test_case_result` matches `example.id`. Minitest `same_test?` matches class and method name together, so two tests that share a method name do not clear each other. |
+| P10 | Commands that arrive during a batch are applied. Ruby leaves them on the FIFO and handles them when the batch returns; a concurrent reader is equivalent. A lost connection while a result is being sent aborts the batch, forgets that result so it can be reassigned, and reconnects outside the exception handler. Coverage hooks that read `$!` otherwise fail the process. | RSpec `Formatter` rescues `ConnectionLostError`, sets `wants_to_quit` and `connection_lost`, and calls `remove_test_case_result`. `RunnerWrapper#run_test_cases` then raises. `Controller#start` retries in a loop around `connect_and_run`, not inside the rescue. |
+| P11 | Reconnect with `reconnect=true`. Sleep `min(attempt, 4)` seconds. The 11th failure exits 1. Recording stays latched, and traces already collected stay in memory. | `Controller#prepare_retry!`, `#handle_reconnect`. `TestMap.configure` keeps `@recorder` for the life of the process. |
+| P12 | On `SIGINT` or `SIGTERM`, send `terminating` with the signal, wait 250 ms, close the session, and exit with the status of tests this process has already finished. A runner that has not failed anything exits 0. | `Controller#report_termination`, `TERMINATION_REPORT_GRACE`, `#handle_termination_signals`, `runner.exit_status`. |
+| P13 | `close` with an integer `exit_status` skips finish hooks and is the process status. `null` runs finish hooks and exits with the framework status. Then send `report_at_finish` with `connection_retries` at least. | `Controller#handle_close`. |
+| P14 | Suite hooks run once per process. Finish hooks run once, and are skipped when `exit_status` is an integer. | RSpec `Configuration#with_suite_hooks` (`@before_suite_hooks_run`) and `#after_suite_hooks`; `RunnerWrapper#finish`. Minitest `selective_prerun` / `selective_postrun` (the two halves of `Minitest.run`) and `@@after_run` in `finish`. |
+| P15 | A hook the author wrote as once-per-group runs for every assigned test, including a test from a later batch in the same process. | RSpec `Hooks` rewrites `:all` to `:each` for `before`, `prepend_before`, `after`, and `append_after` at definition time. `--require-each-hooks` raises if `:all` is used (`RequireEachHooks`). Minitest `setup` / `teardown` are already per method, and `run_one_method` invokes them. |
+| P16 | Time spent inside those rewritten group hooks is included on `report_at_finish` as `seconds_in_{hook}_all_hooks`. The server logs the hash and does not branch on it. | RSpec `Hooks`, accumulated on `Controller.report_at_finish`. |
+| P17 | A file that is already loaded is not loaded again. | RSpec `Configuration#get_files_to_run` rejects `loaded_spec_files`. Minitest `configure` requires each file once. |
+| P18 | The framework's own paths, filters, and flags still bound discovery. The default path is the framework's default. A plain invocation that does not connect (`selective exec`) does not require the CI environment. | RSpec `parse_args`, `DEFAULT_SPEC_PATH` (`./spec`), default `--format=progress`. Minitest `parse_args`, `DEFAULT_TEST`, `INCLUDE_PATTERN`, `EXCLUDE_PATTERN`. `Controller#exec`; `#runner_id` is resolved on first connect, not in the constructor. |
+| P19 | Per-test formatter output stays quiet until finish. A profiler that assumes one local run is turned off. Listener registration does not duplicate an output path. | `Controller.suppress_reporting!` / `restore_reporting!`. RSpec formatter monkeypatches (`MAP`) no-op `message`, `dump_pending`, `seed`, `close`, `start_dump`, `dump_profile`. `Reporter#finish` clears `profile_examples`. `Reporter#register_listener` skips a listener whose output path is already registered. Minitest calls `reporter.report` inside `selective_postrun`. |
+| P20 | Exit status is 1 only when a remaining result is a hard failure. Skips do not fail the process. | RSpec `exit_status`: on 3.10+ `Runner#exit_code` with `failed_examples.none?`; otherwise `failed_examples.any?`. Minitest `exit_status` uses `failures.reject(&:skipped?)`. |
+| P21 | If the framework has an in-process parallel executor, start it and shut it down the way its own runner does, and do not crash when the executor has no `start` (Minitest with `MT_CPU=1`). When the tracer cannot attribute concurrent tests to one id, run the assigned ids one at a time in the same warm process. The ids are still the ones the server sent. | Minitest `selective_prerun` / `selective_postrun` (`parallel_executor.start` / `shutdown` only if the method exists). RSpec runs the assigned example groups through `run_specs` in this process. |
+| P22 | Two tests that would share an id are both still listed. Warn, and disambiguate the second id. A dropped id is a test the server never assigns. | Minitest `configure` warns on a duplicate `Class#method` digest and, today, keeps only the first. New clients keep both. RSpec `example.id` is unique per example. |
+| P23 | When `configure_test_map` says `tree: true`, the manifest includes `test_map_tree` from the git snapshot algorithm. A non-checkout omits the tree and the run selects nothing. | `Controller#handle_test_manifest`, `TestMap::Tree.snapshot`. |
+| P24 | `modified_test_files` is the diff against the target branch, limited to the suite root, and affects order only. A missing branch, a failed fetch, or a failed diff warns and omits the field. | `Controller#get_diff`, `#modified_test_files` (paths matching `runner.base_test_path`). |
+| P25 | When a diff exists, send `correlated_files`: co-change counts of this suite's test files across recent commits on the target branch. A failed correlation warns and omits the key. Selection does not read the field. | `Controller#correlated_files`, `FileCorrelator#correlate`. `lib/bin/file_correlation_collector.sh` only matches `spec/*_spec.rb`, so a Minitest run records an empty hint. New clients point the same count at their own test glob. |
+| P26 | `configure_test_map` may arrive twice. `record: true` latches for the process. If the server asks for a recording and the tracer is missing, warn once and keep running. Ignore the Ruby-only `allocations` key. | `Controller#handle_configure_test_map`. `TestMap.configure`. |
+| P27 | Advertise `test_map` as `record`, `select`, or `0`. Forward `SELECTIVE_TEST_MAP_RECORD` unchanged. `SELECTIVE_TEST_MAP_DISABLE` of `1`, `true`, or `yes` forces `0`. | `TestMap.capability`, `TestMap.disabled?`, `Controller#base_transport_url_params`. |
+| P28 | While recording, trace setup, the body, and teardown of each assigned id. A dependency seen on any attempt is kept (union). Honor `SELECTIVE_TEST_MAP_IGNORE`. Ignore installed dependencies and this client's own code. | `TestMap.around`. RSpec `Example#run` wraps the whole example. Minitest `with_test_map` wraps `run_test`, which includes `setup` / `teardown`. `Recorder#record`, `FORMAT_VERSION` 1. `Tracer` applies the ignore list. |
+| P29 | After `close`, POST the gzip fragment to `/test_maps/fragments` from outside the test process, so HTTP stubs cannot swallow it. Header `authorization` is the raw key. Retry 3 times. Failure warns and does not change the test exit status. | `Controller#upload_test_map`. `TestMap::Uploader` `PATH`, `ATTEMPTS`, `SELECTIVE_TEST_MAP_UPLOAD_KEY`, `CLEAN_ENV` child. |
+| P30 | Every connection sends the identity query parameters, including `language`, `core_version`, `framework`, `framework_version`, `framework_wrapper_version`, `runtime_version`, `test_map`, and `test_map_record`. | `Controller#base_transport_url_params`. RSpec `framework` / `framework_version` / `wrapper_version`. Minitest equivalents on `RunnerWrapper`. |
+| P31 | An unknown command is ignored. Raise only under `--debug`. | `Controller#handle_command`. |
+| P32 | Loading the suite must not autorun it or exit the process. The session loop owns the lifecycle. Plugins still initialize. | Minitest `autorun` is a no-op because Rails calls it from `active_support`. `selective_prerun` still `load_plugins` and `init_plugins` (skipped on Minitest 6+). RSpec is built with `Runner.new` and `setup`, and runs only when `run_test_cases` says so. |
+
+`report_at_finish` may also carry adapter diagnostics beyond P16. The server logs them.
+
 ## What the Ruby client actually is
 
 Two different native pieces get conflated. They stay separate in every new language.
@@ -268,7 +317,7 @@ Then send `report_at_finish`, upload a fragment if one exists, and exit. `report
 
 `modified_test_files` is optional and only affects order. It is the paths from `git diff origin/{target_branch} --name-only` that sit under the suite's test root. A missing target branch, a failed fetch, or a shallow clone that cannot see the branch produces a warning and the field is omitted. Selection does not use it.
 
-`correlated_files` is an optional legacy ordering hint computed by the Ruby shell script (co-change counts of `spec/*_spec.rb` across recent commits on the target branch). The server treats a missing key as "no hint". New clients omit it. Selection does not use it.
+`correlated_files` is required when a diff exists (P25). It is an ordering hint: co-change counts of this suite's test files across recent commits on the target branch. The Ruby collector only matches `spec/*_spec.rb`, which is why Minitest currently sends an empty hint. New clients run the same count against their own test glob. A failed correlation warns and omits the key. Selection does not use the field.
 
 `test_case_result`
 
@@ -375,7 +424,7 @@ CI layout that matches the Ruby docs: a matrix of runners, `fail-fast: false` (a
 
 ## Adapter interface
 
-The framework adapter is the only code that knows the test runner. The session loop above is language core. The adapter exposes:
+The framework adapter is the only code that knows the test runner. The session loop above is language core. Together they implement every row of the [parity bar](#parity-bar). The adapter exposes:
 
 | Method | Contract |
 |---|---|

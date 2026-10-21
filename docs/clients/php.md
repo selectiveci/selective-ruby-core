@@ -1,8 +1,31 @@
 # PHP (PHPUnit, then Pest)
 
-Marketing order: third. PHPUnit is the base. Pest runs on top of PHPUnit, so the Pest package should be a small bootstrap on the PHPUnit client, not a second session loop. ParaTest and `pest --parallel` are local process pools. `pest --dirty` is changed files. Neither is a hosted queue.
+Marketing order: third. Feasibility of full parity: third. PHPUnit is the base. Pest runs on top of PHPUnit, so the Pest package is a bootstrap on the PHPUnit client, not a second session loop. ParaTest and `pest --parallel` are local process pools. `pest --dirty` is changed files. Both are outside the parity bar.
 
-Read [SPEC.md](SPEC.md) for the wire contract.
+Read [SPEC.md](SPEC.md) for the wire contract and the parity bar. PHPUnit is the first framework. Pest compiles down to PHPUnit tests, so it is a bootstrap on this client after PHPUnit conformance is green, not a second session loop.
+
+**Verdict: proven for the split, feasible with risk on data-provider construction across PHPUnit majors.** `TestSuite` plus a `TestCase` for one method is the API IDEs and ParaTest already drive. No row is blocked. No fork. PHPUnit's draft parallel worker (PR 6784) is an existence proof of a process that boots once and runs many tests; its scheduler hands out classes, and ours hands out methods, so we do not adopt that scheduler.
+
+## Parity
+
+Rows P4, P10–P14, P16, P19, P23–P27, and P29–P31 are the session loop on `transport --stdio`. Port of `Controller`. Rating: proven.
+
+| Id | Mechanism | Rating |
+|---|---|---|
+| P1 | One PHP process. Boot through PHPUnit's configuration and bootstrap once. For each assigned id, build a `PHPUnit\Framework\TestSuite`, `addTest` a `TestCase` constructed as `new ClassName('methodName')`, and `TestSuite::run` on a `TestResult`. The Laravel application stays booted. Do not spawn a PHPUnit process per batch (that is ParaTest's chunk model). | proven |
+| P2 | `Class::method`, and `Class::method#dataset` when there is a data set. That is the id PHPUnit's `--list-tests` prints, and it survives a line shift. | proven |
+| P3 | `--list-tests-xml` (or the suite built and not run) for discovery. Bodies have not run. Empty list exits 1. Data-provider cases are built with `setData` on the public `TestCase`. `TestBuilder` is internal and has moved in 10, 11, 12, and 13; stay off it. Providers must be deterministic, because they execute at build time; cache the built cases. | feasible with risk |
+| P5–P7, P20 | `TestResult` errors and failures map to `failed`, skipped and incomplete to `pending`, the rest to `passed`. Project frame first. Exit 1 only for a remaining error or failure. | proven |
+| P8, P9 | `TestResult` accumulates. Clear the earlier result for that id before the rerun, or run the retry on a fresh `TestResult` and merge. `remove_failed` matches class, method, and data-set name. | proven |
+| P15, P16 | One test per `TestSuite::run` re-enters `#[BeforeClass]` / `setUpBeforeClass`, which is the RSpec `:all` → `:each` rule. A suite of two methods from one class runs `BeforeClass` once and is short of parity. `BeforeClass` time goes to `seconds_in_*_all_hooks`. Suite bootstrap stays once (P14). | proven |
+| P17 | The bootstrap and the class files stay loaded. `require` runs once. | proven |
+| P18 | `phpunit.xml`, `--filter`, `--testsuite`, and `--group` bound discovery the way `vendor/bin/phpunit` would have. `selective exec phpunit` lists tests and does not open a socket. | proven |
+| P21 | `pest --parallel` and ParaTest stay off. Coverage is per process. The assigned ids run one at a time in this process. | proven |
+| P22 | Two methods cannot share a name on one class. A data set whose name repeats gets a warning and a suffix. | proven |
+| P28 | When `record: true` and the `pcov` extension is loaded, `SebastianBergmann\CodeCoverage` `start($id)` / `stop()` around the test, including `setUp` and `tearDown`. Ignore `vendor/` and `SELECTIVE_TEST_MAP_IGNORE`. Xdebug is slower; use it only when PCOV is absent and the user opted in. Advertise `select` when neither is loaded. Installing the package does not require PCOV. | proven |
+| P32 | The script is `vendor/bin/selective`. It does not call PHPUnit's `Application::run` in a way that executes and exits before the socket loop. Extensions from `phpunit.xml` still load. | proven |
+
+ParaTest's `WrapperRunner` (`--functional`) is the same shape: one worker, bootstrap once, one method at a time. PHPUnit PR 6784 (commit `52db4ed` on the draft, distribution unit is one class so `BeforeClass` stays once per class) shows the project itself now wants a persistent worker. Our unit is one method because of P15.
 
 ## Binding
 
@@ -18,23 +41,11 @@ v1 targets: Linux gnu x86_64 and aarch64, macOS x86_64 and aarch64, plus musl on
 
 ## Discovery and running a subset
 
-PHPUnit 10 and later has a real extension point (`PHPUnit\Runner\Extension\Extension`, subscribers for started, finished, failed). Those subscribers observe a run. They do not let you pause the runner and wait for a socket. `--filter` and `--order-by` are fixed before the process starts. `--list-tests` and `--list-tests-xml` are the discovery formats (class, method, data set, file).
+PHPUnit extension subscribers observe a run. They do not pause it. `--filter` is fixed before `Application` starts. The client is the process: it builds a `TestSuite` of the assigned methods and calls `run` on the already-booted bootstrap.
 
-ParaTest's model is "spawn a PHPUnit process per chunk of files." That throws away boot (Laravel's application, the database) on every chunk. Do not do that for the inner loop.
+Support PHPUnit 10 and later. CI runs 10, 11, 12, and 13. The file allowed to construct cases is the adapter's suite builder, and it uses `TestSuite::addTest` and `TestCase`, not `TestBuilder`.
 
-The client is a PHP script, `vendor/bin/selective`, that uses PHPUnit as a library:
-
-1. Boot the way PHPUnit's `Application` does (configuration from `phpunit.xml`, bootstrap file, extensions).
-2. Build the suite and list tests without executing them. The id is `Class::method` plus the data-set name when there is one. That is stable across line shifts and is what failure UIs already show.
-3. Send the manifest.
-4. For each batch, build a suite containing only those tests and run it through PHPUnit's test runner, with the project's listeners and extensions still attached.
-5. Map errors and failures to `failed`, skipped and incomplete to `pending`, the rest to `passed`.
-
-PHPUnit 10, 11, and 12 moved builder types. Support 10 and later only, and pin a CI matrix of those majors. Reaching into `TestRunner` is version-sensitive on purpose; hiding it behind one class is the whole adapter.
-
-A repeated id must not append a second result to JUnit XML. PHPUnit's `TestResult` accumulates. Clear the earlier result for that id, or run the retry in a fresh `TestResult` and merge.
-
-Pest: a test file is PHPUnit tests generated by `Pest.php`. The Pest package depends on the PHPUnit package, registers Pest's bootstrap, and uses the same runner. `it()` / `test()` names become the ids people see in Pest output. Ship this only after PHPUnit conformance is green. `pest --parallel` stays off under Selective, same as pytest-xdist.
+Pest's `it()` / `test()` names are the ids in Pest output. The Pest package depends on the PHPUnit package, registers `Pest.php`, and uses this runner. `pest --parallel` stays off.
 
 ## Coverage (test map)
 
@@ -55,7 +66,7 @@ PCOV is per process. Tests that shell out miss those files. Same tradeoff as eve
 
 ## Risks
 
-- PHPUnit's internal builders change between majors. The matrix is 10, 11, and 12, and the adapter's run method is the only file allowed to touch them.
+- Data-provider construction is the row that moves between majors. The matrix is PHPUnit 10, 11, 12, and 13. The suite builder is the only file that constructs cases, and it stays on `TestSuite` / `TestCase`.
 - Laravel's `CreatesApplication` and `RefreshDatabase` assume they run inside PHPUnit's lifecycle. Building our own suite and skipping that lifecycle is the bug to avoid. Run a Laravel skeleton in CI, not only bare PHPUnit.
 - Data providers that generate different sets on different shards (random, time) produce manifests the server cannot reconcile. Document that providers must be deterministic. Ruby has the same constraint and does not solve it.
 - Pest's architecture plugins that swap the test runner. Re-test when Pest majors.

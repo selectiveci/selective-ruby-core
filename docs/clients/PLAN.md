@@ -1,8 +1,24 @@
 # Build plan
 
-Design only. No new client repository is created by this document. Order follows the marketing note: Elixir, Python, PHP, JavaScript, Java. Elixir starts even if the request form is empty, because we can dogfood it. The others wait on the trigger in that note (design partners) unless we choose otherwise.
+Design only. No new client repository is created by this document.
 
-The contract is [SPEC.md](SPEC.md). Language notes: [elixir.md](elixir.md), [python.md](python.md), [php.md](php.md), [javascript.md](javascript.md), [java.md](java.md).
+Build order is feasibility of the [parity bar](SPEC.md#parity-bar): a warm process, server-assigned test ids, hook re-entry, retries, and the test-map fragment. The marketing note (Elixir, Python, PHP, JavaScript, Java) still decides when a language is announced. It does not decide which client is writable first. Elixir remains the suite we can dogfood, and it is last in this list because a repeated `ExUnit.run/1` is the least proven loop.
+
+The contract is [SPEC.md](SPEC.md). Language notes: [python.md](python.md), [java.md](java.md), [php.md](php.md), [javascript.md](javascript.md), [elixir.md](elixir.md).
+
+## Order
+
+| Rank | Language | First framework | Later framework, same split | Verdict |
+|---|---|---|---|---|
+| 1 | Python | pytest | Django's runner only if a partner needs it | Proven split. P15 (module fixtures vs session fixtures) is the one private surface. |
+| 2 | Java | JUnit Platform launcher inside a Surefire provider | Gradle test worker, same launcher | Proven split. JaCoCo path mapping is the recording risk. |
+| 3 | PHP | PHPUnit 10+ `TestSuite` of one method | Pest, a bootstrap on the PHPUnit client | Proven split. Data-provider construction across majors is the risk. |
+| 4 | JavaScript | Vitest `>= 4.1` | Jest 29, then 30 | Feasible with risk. Vitest static tests are proven; `test.each` and Jest's watch internals are the risk. |
+| 5 | Elixir | ExUnit | none | Feasible with risk. Public `only_test_ids` and `ExUnit.run/1`. A second run in one VM is not Mix's normal path. |
+
+No language is blocked. None of these need a framework fork or an upstream feature. A file-level or statically sharded mode is not a slice in any repository.
+
+What "first framework" means: the adapter that implements every parity row. Vitest before Jest, because `runTestSpecifications` plus `testIds` is a public API and Jest's warm loop is `@jest/core`. PHPUnit before Pest, because Pest emits PHPUnit cases. Surefire before Gradle, because `SurefireProvider.invoke()` is the JVM `mvn test` already forked; a classpath-only main is the harness for that same loop, not a client that ships ahead of Surefire.
 
 ## What every client is
 
@@ -57,7 +73,7 @@ One repository per framework, mirroring `selective-ruby-core` plus `selective-ru
 | `selectiveci/selective-js-core` | napi binding, sidecar fallback, session | transport crate and binary |
 | `selectiveci/selective-js-vitest` | Vitest adapter | selective-js-core |
 | `selectiveci/selective-js-jest` | Jest adapter | selective-js-core |
-| `selectiveci/selective-java-junit` | Sidecar session, launcher CLI, then Surefire | transport binary |
+| `selectiveci/selective-java-junit` | Sidecar session, Surefire provider hosting the launcher | transport binary |
 
 Each client runs the transport repo's conformance scenarios in CI. A green local mock is not a private copy of the scenarios.
 
@@ -67,49 +83,50 @@ Server follow-ups, not client repositories: per-language full-run patterns (`mix
 
 ## Slices per language
 
-Each slice is a PR an agent can finish and conformance-test. "First PR" is the first one that talks to the mock and runs a real suite subset.
+Each slice is a PR an agent can finish and conformance-test. The first PR of a language is a client only when every parity row that PR claims is actually running: per-test ids, a warm process, a retry that replaces the earlier result, `remove_failed_test_case_result`, and the group-hook counter (P15). Advertising `select` until the tracer is trustworthy is fine. Advertising a file id is not.
 
-### Elixir
+### Python (pytest)
 
-1. **First PR.** Mix project, download the stdio binary, Port, session loop, ExUnit discovery and batch execution, `transport --snapshot` on the manifest, conformance green. Advertise `select`. Replace `mix test` on one internal app.
-2. `:cover` around each test, fragment upload, advertise `record`.
-3. Hex publish path: checksummed `priv/transport`, README, GitHub Action example.
-
-Risk to watch in PR 1: `ExUnit.Runner` is private. Pin Elixir versions in CI.
-
-### Python
-
-1. **First PR.** Package with the sidecar face only, pytest collection and a replaced run loop, snapshot on the manifest, conformance green, a Django skeleton in CI. Advertise `select`.
+1. **First PR.** Package with the sidecar face, pytest collection, replaced `pytest_runtestloop`, module-fixture counter green, snapshot on the manifest, conformance green, a Django skeleton in CI. Advertise `select`.
 2. coverage.py contexts and upload.
 3. maturin wheels (manylinux, musllinux, macOS, Windows) and the import-then-sidecar fallback.
 
-The wheel slice is last so the adapter is not blocked on cibuildwheel.
+The wheel slice is last so the adapter is not waiting on cibuildwheel.
 
-### PHP
+### Java (JUnit Platform, Surefire host)
 
-1. **First PR.** Composer package, sidecar session, PHPUnit 10+ discovery and in-process batches, conformance on 10, 11, and 12, plus a Laravel skeleton.
+1. **First PR.** Surefire provider whose `invoke()` discovers, opens the session, and `execute`s unique ids one at a time. `@BeforeAll` counter green. Conformance on JDK 17 and 21, in a forked Surefire JVM. The classpath-fed main is in this PR as the mock-server harness.
+2. Gradle plugin or test-worker host, same launcher.
+3. JaCoCo dump-and-reset and class-to-source mapping. Advertise `select` until a fragment path is a snapshot key.
+
+### PHP (PHPUnit, then Pest)
+
+1. **First PR.** Composer package, sidecar session, one-method `TestSuite` in the booted process, `BeforeClass` counter green, conformance on PHPUnit 10, 11, 12, and 13, plus a Laravel skeleton.
 2. PCOV per-test coverage and upload.
 3. `selective/pest` repository: Pest bootstrap, same session, its own conformance file of Pest-style names.
 
-### JavaScript
+### JavaScript (Vitest, then Jest)
 
-1. **First PR, core plus Vitest.** `selective-js-core` on the sidecar, Vitest `createVitest` and `runTestSpecifications`, one worker, conformance green. napi packages can land in this PR or the next; the sidecar must work first.
+1. **First PR, core plus Vitest.** `selective-js-core` on the sidecar. Vitest `createVitest`, `standalone`, `parseSpecifications`, `collectTests` for dynamic cases, `runTestSpecifications` with one `testIds` entry per call, one fork, `beforeAll` counter green, conformance green. napi packages can land in this PR or the next; the sidecar works first.
 2. napi `optionalDependencies` and the `dlopen` fallback. v8 coverage, with transformed URLs resolved to git paths before we advertise `record`.
-3. **Jest PR.** Circus collection in `selective-js-jest` against the same core. If per-test deferral is unstable, ship file-level ids and say so in the README rather than blocking the repository.
+3. **Jest PR.** Jest 29 watch-loop driver (`runInBand`, programmatic config, not the CLI `--watch` flag) in `selective-js-jest`, circus collection, `beforeAll` counter green. Jest 30 is a follow-up on that pin. A red counter sends the work back to the watch loop or the long-lived `jest-worker` farm. It does not change the manifest to file paths.
 
-### Java
+### Elixir (ExUnit)
 
-1. **First PR.** Pure-Java CLI, sidecar, JUnit Platform discover and `execute` by unique id, conformance on JDK 17 and 21.
-2. Surefire provider so `mvn test` can delegate without a hand-built classpath.
-3. Gradle plugin.
-4. JaCoCo dump-and-reset, class file to source path. Advertise `select` until this is right.
+1. **First PR.** Mix project, stdio binary, Port, session loop, `only_test_ids` plus `ExUnit.run/1` one id at a time, `setup_all` counter green, `transport --snapshot` on the manifest, conformance green. Advertise `select`. Replace `mix test` on one internal app.
+2. `:cover` around each test, fragment upload, advertise `record`.
+3. Hex publish path: checksummed `priv/transport`, README, GitHub Action example.
+
+The private `ExUnit.Runner` module is not on this path. Pin the Elixir versions CI already runs.
 
 ## Conformance before publish
 
 A client slice is mergeable when:
 
 - The transport scenarios pass, including reconnect, a repeated id, `remove_failed_test_case_result` from a simulated other runner, `close` with an integer status, and `SIGTERM` after a failure.
-- A sample project (Phoenix, Django, Laravel, a Vitest package, a Surefire project) runs a subset and exits with the framework status.
+- A sample project (Django, a Surefire suite, Laravel, a Vitest package, Phoenix) runs a subset and exits with the framework status.
+- The group-hook counter for that framework is greater than one across two batches of the same group (`setup_all`, `@BeforeAll`, `BeforeClass`, `beforeAll`, or a module-scoped fixture), and the suite hook ran once.
+- A repeated id replaces the earlier JUnit or reporter entry.
 - Recording slices additionally upload a fragment whose paths are keys in the snapshot.
 - Install does not require a compiler, except the PyO3 and napi release workflows themselves.
 
@@ -122,3 +139,4 @@ Do not publish to Hex, PyPI, Packagist, npm, or Maven Central from the first PR.
 - Porting `selective_tracer`.
 - Playwright, TestNG, Django's runner, or a second JS test runner besides Jest and Vitest, until a partner asks.
 - A hosted selector inside Nx, Turborepo, or Develocity.
+- A client whose manifest id is a file, or whose split is a static shard, including as a temporary mode.

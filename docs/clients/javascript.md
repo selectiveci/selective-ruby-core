@@ -1,10 +1,56 @@
 # JavaScript and TypeScript (Vitest, then Jest)
 
-Marketing order: fourth. One language, two frameworks, two repositories, one core package. Vitest before Jest: Vitest exposes a programmatic runner, and Jest's public extension points are static. Playwright is out of scope until a design partner asks; the CI time is often there, and the runner model is different (browser processes).
+Marketing order: fourth. Feasibility of full parity: fourth. One language, two frameworks, one core package. **Vitest is the first framework.** Jest is second, on the same core, and it is feasible with risk. Playwright is out of scope until a design partner asks; the runner model is browser processes.
 
 TypeScript is not a separate client. Vitest and Jest both run it.
 
-Read [SPEC.md](SPEC.md) for the wire contract.
+Read [SPEC.md](SPEC.md) for the wire contract and the parity bar.
+
+**Verdict: feasible with risk. Nothing is blocked, and neither framework needs a fork.** Vitest 4.1 runs a list of test ids inside one long-lived instance; static tests are proven, and `test.each` needs a collect pass. Jest's public `TestSequencer`, `--shard`, and `--listTests` are static and outside the contract. The warm path is Jest's own watch loop, driven as a library with `runInBand`, so CI's habit of turning `--watch` off does not apply. Knapsack Pro's Jest client (`runCLI` per batch of file paths) leaves workers cold and runs files; that shape is outside the contract.
+
+## Parity
+
+Rows P4, P10–P14, P16, P19, P23–P27, and P29–P31 are the session loop in `@selectiveci/core`, on napi-rs or `transport --stdio`. Port of `Controller`. Rating: proven. The two adapters differ on the rows below.
+
+### Vitest (first)
+
+Pin Vitest `>= 4.1`. `testIds` on `TestSpecification` landed in 4.1.0. `standalone()` (4.1.1; `init` is the deprecated name) prepares reporters and coverage and does not run tests. Keep the instance for the shard and do not call `close()` between batches.
+
+| Id | Mechanism | Rating |
+|---|---|---|
+| P1 | `createVitest` once. `globTestSpecifications` to learn the files. Each assigned id becomes `project.createSpecification(moduleId, { testIds: [id] })`, then `runTestSpecifications`. One id per call so `beforeAll` re-enters (P15). `rerunTestSpecifications` also emits watcher events; use `runTestSpecifications`. Do not call `startVitest` per batch. The forks pool stays at one worker for the life of the instance. | proven |
+| P2 | `TestCase.id` (file hash, suite index, test index). Vitest documents that callers must not parse the id; it can start with a minus. Use it whole. `generateFileHash` from `vitest/node` has existed since v3. `TestCase.toTestSpecification()` (4.1+) returns a spec for that case and is the same filter. | proven |
+| P3 | Static tests: `experimental_parseSpecifications` on 4.1 (rollup `parseAst` over Vite `ssrTransform`, no import following). Later majors rename it to `parseSpecifications`. `test.each`, `test.for`, and template names are marked `dynamic: true` with an id postfix of `-dynamic`, and that id cannot filter the run. For those, `collectTests` executes the file and not the callbacks, inside this instance, with isolation off for the collect pass so it stays cheap. The names from that pass are the manifest ids, and later batches filter them with `testIds`. | proven for static tests; feasible with risk for dynamic tests |
+| P5–P7, P20 | A custom reporter's `onTestCaseResult`. `pass` / `fail` / `skip` map to `passed` / `failed` / `pending`. Project frame first. | proven |
+| P8, P9 | Drop the earlier case result from the reporter's store before the id runs again. `remove_failed` deletes by `TestCase.id`. | proven |
+| P15, P16 | One `testIds` entry per `runTestSpecifications` re-executes the file's hooks, so `beforeAll` / `afterAll` run per assigned test. If a warm worker with `isolate: false` then skips `beforeAll` on the second call, invalidate that module in the Vite graph before the call. A conformance fixture counts `beforeAll`. Time those hooks for P16. `globalSetup` stays once (P14). | feasible with risk |
+| P17 | The Vite server and the worker stay up. Module invalidation is only the P15 lever, and only for the file about to run. | proven |
+| P18 | `include`, `exclude`, `testNamePattern` from the project config, and CLI path filters, bound discovery. `selective exec vitest` collects and returns without a socket. `--shard` and `--changed` are off. | proven |
+| P21 | `fileParallelism: false`, `poolOptions.forks.singleFork` (one worker). A parent-only trace is empty if tests run in a worker we do not wrap. The first recording PR asserts the fragment names a project source file. | proven |
+| P22 | A dynamic id that collides after `collectTests` gets a warning and a suffix. | proven |
+| P28 | `@vitest/coverage-v8` precise coverage around the test. Map script URLs back to git paths. Drop `node_modules`, `\0`, and `node:`. Advertise `record` only after a fixture shows a repo path that exists in the snapshot. Istanbul is the other provider; v8 is first. | feasible with risk |
+| P32 | `standalone()` does not run the suite. The session loop is what waits. | proven |
+
+### Jest (second)
+
+Pin one major. Jest 29 is the installed base; re-run the same fixture on 30 before widening the range. The CLI clears `--watch` when `CI` is set, so the client does not pass `--watch` on argv. It builds the global config itself (`watch: true`, `runInBand: true`) and calls the watch entry in `@jest/core` (`packages/jest-core/src/watch.ts`, `updateConfigAndRun` / `startRun`). `shouldRunInBand` returns true when `runInBand` is set, including in watch mode (current `testSchedulerHelper.ts`; on 29.2 the same outcome comes from `runInBand` forcing `maxWorkers` to 1, and watch mode runs in band when there is one worker). Each batch sets `testNamePattern` to the assigned full names and calls `startRun` again. The haste map is built once.
+
+The other shape, if the watch entry fights CI's non-TTY stdio, is a long-lived `jest-worker` farm: `jest-runner` builds a `Farm` per `scheduleTests` and `end()`s it in a `finally`. Keeping the farm and sending the next file is the same process model. Either way the test bodies run in a process we still hold.
+
+| Id | Mechanism | Rating |
+|---|---|---|
+| P1 | The loop above. One full name per `startRun` so `beforeAll` re-enters. `TestScheduler.scheduleTests` runs the selected files in the parent because `runInBand` is set. | feasible with risk |
+| P2 | Full name: ancestor `describe` titles plus the test title, the string `--testNamePattern` already matches. | proven |
+| P3 | Circus runs `describe` callbacks when the file loads. A custom environment records `test` / `it` registrations and does not call `run()` during collection. `test.each` names exist after that evaluation. `--listTests` prints files and is not discovery. | feasible with risk |
+| P5–P7, P20 | Circus `test_done` and `test_fn_failure`. Skip maps to `pending`. | feasible with risk |
+| P8, P9 | Jest aggregates results per `scheduleTests`. Drop the earlier assertion result for that full name before the rerun, including from the junit reporter. `remove_failed` matches the full name. | feasible with risk |
+| P15, P16 | One name per file execution re-runs `beforeAll` / `afterAll`. A batch of two names loaded once runs `beforeAll` once and is short of parity. `globalSetup` stays once. Count `beforeAll` in CI. | feasible with risk |
+| P17 | The haste map and the transformed file cache stay. The file is re-entered for hooks; it is not re-transformed from source each time unless the cache key changes. | feasible with risk |
+| P18 | `testPathPatterns`, `testPathIgnorePatterns`, and the project's config bound which files are collected. Flags Jest would have honored still apply. `selective exec jest` collects and returns without a socket. | proven |
+| P21 | `runInBand` so the trace is in the parent. `maxWorkers` greater than 1 puts tests in children and the parent's coverage is empty. | proven |
+| P22 | Two tests with the same full name get a warning and a suffix before the manifest is sent. | proven |
+| P28 | `coverageProvider: 'v8'`. `takePreciseCoverage` in a custom environment between tests, then reset. Reverse source maps so the fragment names git paths. Advertise `select` until a fixture shows a project file. | feasible with risk |
+| P32 | We call the programmatic entry. Jest's CLI autorun and the CI watch-disable do not own the process. | proven |
 
 ## Binding
 
@@ -20,52 +66,19 @@ POSIX FIFOs are not a Node option. The current Ruby transport cannot run on Wind
 
 ## Vitest
 
-Vitest's node API is the adapter.
+The node API above is the whole adapter. `--shard`, `--changed`, and Nx or Turborepo "affected" select projects or files at launch. Selective runs inside one project, on ids.
 
-- `createVitest` from `vitest/node` builds an instance without running.
-- `init` loads reporters and the coverage provider and does not run tests. Keep `watch: true` even though we do not use the file watcher: Vitest uses that flag to allow a long-lived instance.
-- Collected files come from the project graph (`globTestSpecifications` / module specifications). The manifest id is the test's full name plus its file, the same string Vitest prints (`tests/billing.test.ts > tax > rounds`). Confirm the exact property against the Vitest major we pin; this API has moved before.
-- `runTestSpecifications` runs a specific list in the already-initialized process. Use that for each `run_test_cases` batch. `rerunTestSpecifications` also emits watcher events; prefer `runTestSpecifications` so reporters do not think a file changed.
-- Results come from a custom reporter (`onTestCaseResult` / the task state on the modules returned from the run). Map `pass` / `fail` / `skip` to `passed` / `failed` / `pending`.
-
-Do not call `startVitest` per batch. That boots Vite each time.
-
-Vitest workers (`forks`, `threads`, `vmForks`) run files in other processes. For v1, use the `forks` pool with a single worker, or run in-process if the project is not using a browser pool. Recording has to wrap the test that actually executes. A pool of workers means the trace has to happen in the worker, which means the Selective reporter must be injected into the worker, not only the main process. Start with one fork so the first client is honest. Parallelism inside a shard is a later change; Selective's parallelism is the CI matrix.
-
-`--shard` and `--changed` are static and must not be combined with the Selective command. Nx and Turborepo "affected" are a different layer (which projects run). Selective runs inside one project.
-
-### Coverage
-
-`@vitest/coverage-v8` uses V8's inspector coverage. Per test, the worker can `startPreciseCoverage` / `takePreciseCoverage` around the test (Node's `inspector` / `v8`). Map script URLs to repo-relative files, drop `node_modules` and Vite's virtual modules (`\0`, `node:`). Advertise `record` when the coverage provider can be constructed. Istanbul (`@vitest/coverage-istanbul`) is the other provider; support v8 first because new Vitest projects default to it.
-
-Vite transforming a file means the covered URL might be a transformed module id. Resolve it back to the source file or the fragment will name paths that are not in `git ls-tree`, and selection will never match. That resolution is the Vitest recording risk.
+Coverage URLs that still point at a transformed module (`\0`, a Vite id) must be resolved to the source file before we advertise `record`. A fragment path that is not a `git ls-tree` key never matches, and the test would stop being selectable.
 
 ## Jest
 
-Jest's public hooks do not take a remote queue.
+`TestSequencer.sort`, `--shard`, `--listTests`, and `--changedSince` fix a file list before the run. Reporters see results and do not choose the next test. None of those is the client.
 
-- `TestSequencer.sort` and `shard` reorder or slice the file list before the run. The list is fixed when the run starts.
-- `--listTests` prints files, not test names.
-- `--changedSince` is git, local, static.
-- Custom reporters see results. They do not choose the next test.
-- `jest-circus` is the default runner and its event handler is the closest thing to a hook, but the file's tests are already scheduled when the worker starts.
+`@knapsack-pro/jest` calls `jest.runCLI` per queue batch with `runTestsByPath`. Their issue 24 records that workers are not reused across `runCLI` calls, and they recommend `--runInBand` to avoid the fork. That is a cold, file-level queue. We do not copy it.
 
-The adapter is a long-lived Node process that uses Jest's programmatic entry once:
+What we do copy is the watch loop's repeated `startRun` inside one process, with `runInBand` so `TestScheduler` stays in the parent, and `testNamePattern` set to the assigned names. Internals (`@jest/core`, `jest-circus`, `jest-runner`) move between 27, 29, and 30. The pin is 29 until the `beforeAll` counter passes, then 30.
 
-1. Build the haste map and collect test names without executing bodies. Circus runs `describe` callbacks during collection; a custom environment can record `test` / `it` entries (file plus ancestor titles, which is the id) and defer the functions.
-2. Send the manifest.
-3. On each batch, run those test functions through circus so hooks (`beforeEach`, `afterEach`) still fire.
-4. Report from circus events `test_done` / `test_fn_failure`.
-
-This touches Jest internals (`@jest/core`, `jest-circus`, `jest-runner`) that move between Jest 27, 29, and 30. Pin one major for v1 (whichever the first design partner runs; 29 is still the installed base) and add majors after conformance passes on that pin.
-
-The fallback if circus deferral is unstable: run at **file** granularity. The manifest id is the test file, `run_test_cases` runs whole files through `runCLI`'s test path filter in an already-warm runtime if we can keep it, otherwise a single Jest process per batch. File granularity wastes work inside a file and is still a correct client. Prefer per-test, and do not pretend file granularity is per-test in the manifest or flake tracking breaks.
-
-Jest workers are child processes. Same as Vitest: v1 uses one worker so coverage and results stay in a place we control. `maxWorkers: 1`.
-
-### Coverage
-
-Jest's `coverageProvider: 'v8'` is process-wide. Per test, take precise V8 coverage in a custom environment's `handleTestEvent` and reset between tests. Babel/Istanbul instrumentation is the other provider; support the one the project already configured, v8 first. Ignore `node_modules`. Transformed paths need the same source-map reversal as Vitest.
+`beforeAll` runs once per file execution. One assigned name per execution is what makes a later batch re-enter the hook. A custom environment records names at load time, and the callbacks stay uncalled until the server sends the id.
 
 ## Packaging and CI
 
@@ -76,17 +89,19 @@ Jest's `coverageProvider: 'v8'` is process-wide. Per test, take precise V8 cover
 
 ## Risks
 
-- Vitest's node API is public and has already changed shape once (`state.getFiles` to `state.getTestModules`). Pin a major.
-- Vite module ids versus git paths in the fragment.
-- Jest has no supported "run these names in this warm process" API. Budget the Jest adapter as the one that might ship file-granularity first.
-- Both tools spawn workers. A trace taken in the parent is empty. The first PR should assert that a recorded test lists a project file, not only the test file.
+- Vitest's node API has already moved once (`state.getFiles` to `state.getTestModules`, `init` to `standalone` in 4.1.1, `experimental_parseSpecifications` renamed to `parseSpecifications` after 4.1). The pin is `>= 4.1` and a CI job on the current 4.x, calling the name that major exports.
+- Dynamic tests need `collectTests`. Static parse cannot filter them. The collect pass has to run with isolation disabled or it re-boots every file.
+- `beforeAll` on a warm worker with `isolate: false` might not re-enter. The counter fixture is the gate. Module-graph invalidation is the lever if the counter stays at 1.
+- Vite module ids versus git paths in the fragment. Advertise `select` until a recorded test lists a project source file.
+- Jest's warm loop uses `@jest/core` internals, and the CLI will not leave `--watch` on under `CI`. The programmatic config is the path. A Jest major that stops honoring `runInBand` inside watch changes the worker boundary; the pin catches it.
+- Both tools spawn workers. A trace taken only in the parent is empty when the test ran in a child.
 - Monorepos. One Selective command is one package. Nx affected stays outside.
 - Server full-run patterns: `package-lock.json`, `pnpm-lock.yaml`, `vitest.config.*`, `jest.config.*`, `vite.config.*`.
 - Windows CI for the napi packages is part of the core release, not each framework repo.
 
 ## Effort
 
-Vitest is a medium slice: core session on the sidecar, then napi, then `createVitest` and `runTestSpecifications`, then v8 coverage. Jest is a larger slice on top of the same core, dominated by circus collection. Do not start Jest until Vitest conformance is green and one real repo has run it. Coverage source-map resolution can slip to a follow-up; until it works, advertise `select` for Vitest rather than uploading paths the server cannot match.
+Vitest is a medium slice: core session on the sidecar, then napi, then `createVitest` / `runTestSpecifications` / `parseSpecifications`, with the dynamic-test collect path and the `beforeAll` counter in the same PR. v8 coverage follows, and `record` waits on path mapping. Jest is a larger slice on the same core, dominated by the watch-loop driver and circus collection. Jest starts after Vitest conformance is green. There is no file-level slice.
 
 Repositories: `selectiveci/selective-js-core`, `selectiveci/selective-js-vitest`, `selectiveci/selective-js-jest`.
 

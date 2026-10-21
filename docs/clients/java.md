@@ -1,8 +1,33 @@
 # Java (JUnit 5)
 
-Marketing order: last. JUnit 5 is the framework. Tests actually run through Maven Surefire or a Gradle `Test` task, so the client has a library layer and a build-tool layer. TestNG is out of scope until someone asks. Develocity (predictive selection and test distribution) and CloudBees Smart Tests are the competitors; both are already inside the build tool. A two-person team should not start here.
+Marketing order: last. Feasibility of full parity: second, behind pytest. JUnit 5 is the framework. Tests run through Maven Surefire or a Gradle `Test` task, so the client is the launcher plus a host. TestNG is out of scope until someone asks. Develocity and CloudBees Smart Tests already sit inside the build tool; that is a product overlap, and it does not change the runner.
 
-Read [SPEC.md](SPEC.md) for the wire contract.
+Read [SPEC.md](SPEC.md) for the wire contract and the parity bar.
+
+**Verdict: proven for the split.** The JUnit Platform `Launcher` was built to discover a plan and then `execute` unique ids, which is what IDEs already do, in the JVM that is already up. The first framework is that launcher **hosted by a Surefire provider**, because `mvn test` is where the classpath, `argLine`, and the Spring context actually exist. A CLI that is handed the same classpath is the conformance harness for the same code, not a smaller client. Gradle is the second host, same launcher. No row is blocked. No fork. Develocity's distributor is a different broker; we do not copy it.
+
+## Parity
+
+Rows P4, P10–P14, P16, P19, P23–P27, and P29–P31 are the session loop on `transport --stdio`, inside the Surefire forked JVM. Port of `Controller`. Rating: proven.
+
+| Id | Mechanism | Rating |
+|---|---|---|
+| P1 | `Launcher.discover` once. Each `run_test_cases` id is `launcher.execute(request)` with `DiscoverySelectors.selectUniqueId`, in this JVM. `SurefireProvider.invoke()` is the loop: Surefire has already forked, put the classpath and `argLine` in place, and called `invoke`. The provider reads the socket until `close`. Do not shell `mvn -Dtest=Class#method` per batch. One unique id per `execute` so `@BeforeAll` re-enters (P15). | proven |
+| P2 | The platform unique id, `[engine:junit-jupiter]/[class:com.example.BillingTest]/[method:tax()]`. Stable across line shifts. `@TestFactory` dynamic children get ids at discovery time; factories must be deterministic. Vintage ids come from the platform too. v1 registers the junit-jupiter engine and still reports vintage tests that appear in the plan. No separate JUnit 4 runner. TestNG is out of scope. | proven |
+| P3 | `TestPlan` from `discover`, walking containers to methods and dynamic tests, without `execute`. An empty plan exits 1. | proven |
+| P5–P7, P20 | `TestExecutionListener.executionFinished`. `SUCCESSFUL` → `passed`, `FAILED` and `ABORTED` → `failed`, skipped / `DISABLED` → `pending`. Project frame first (`SourceFile` plus line, else the class name). Exit 1 when a remaining test failed or aborted. | proven |
+| P8, P9 | Listeners that write JUnit XML see one result per id. Replace the earlier one before the rerun. `remove_failed` matches the unique id. | proven |
+| P15, P16 | JUnit runs `@BeforeAll` once per class per `execute`. One id per `execute` re-enters it, including on a later batch. An `execute` of two methods of one class runs `@BeforeAll` once and is short of parity. Time those callbacks for P16. `@BeforeAll` static state that the author expected to survive a class is reset per assigned test, matching RSpec's rewrite of `:all` to `:each`. Suite-level extensions registered once stay once (P14). | proven |
+| P17 | The JVM and loaded classes stay. Discovery is not repeated per batch. | proven |
+| P18 | Tags, `include`/`exclude` engines, and the Surefire `<includes>` patterns bound discovery the way `mvn test` would have. A launcher main with a classpath and no socket runs discovery and returns, for the dry-run. | proven |
+| P21 | Surefire `forkCount` and Gradle `maxParallelForks` are the CI matrix's job, not an inner pool. Inside the forked JVM the provider runs the assigned ids one at a time so a JaCoCo dump belongs to one id. | proven |
+| P22 | Unique ids are unique per plan. A dynamic factory that emits a duplicate gets a warning and a suffix, and both tests are listed. | proven |
+| P28 | JaCoCo agent once. Around each test, `org.jacoco.agent.rt.IAgent.getExecutionData(true)` dumps and resets. Map a class to a source path through the `SourceFile` attribute plus the package, and keep the path only when it is in the git snapshot. Inner classes map to the outer file. `.kt` is fine when it is in git. Generated sources that are not in git are dropped. Advertise `select` until a fixture shows a snapshot key. Do not fail the run to attach the agent. | feasible with risk |
+| P32 | `invoke()` returns when the session closes. Surefire's normal provider does not get to run the whole suite first. | proven |
+
+Gradle, after Surefire: a plugin or the test worker hosts this launcher. Develocity Test Distribution (Gradle `Test`, and Surefire/Failsafe from 2.22.2) partitions by historical time and can retry in the same JVM (`retryInSameJvm` defaults to true). They require the JUnit Platform. That is the same execution model, pointed at their broker. Our broker is the Selective server.
+
+A CLI jar that cannot see the project's test classpath is not the client. The harness used in conformance constructs the classpath the way Surefire does, then calls the same `invoke` loop.
 
 ## Binding
 
@@ -18,30 +43,7 @@ Maven Central gets the jar only. Native classifiers can wait until in-process bi
 
 ## Discovery and running a subset
 
-JUnit Platform is the one runner in this set that was built for "discover everything, then execute some ids."
-
-- `Launcher.discover` with no method filter returns a `TestPlan`.
-- Each `TestIdentifier` has a unique id (`[engine:junit-jupiter]/[class:com.example.BillingTest]/[method:tax()]`). That id is stable across line shifts and is the manifest id.
-- `launcher.execute` with `DiscoverySelectors.selectUniqueId` runs exactly those tests, including `@BeforeEach` and extensions.
-- `TestExecutionListener.executionFinished` reports the result. `SUCCESSFUL` -> `passed`, `FAILED` and `ABORTED` -> `failed`, `DISABLED` / skipped -> `pending`.
-
-The process stays up. Discovery once, then `execute` per batch. A repeated unique id is executed again. Listeners that write JUnit XML must see one result per id; reset or replace the earlier one.
-
-Dynamic tests (`@TestFactory`) get unique ids at discovery time. Use those ids. If a factory is non-deterministic, the manifest and a later retry will disagree; document that factories must be deterministic. Same constraint as PHPUnit data providers.
-
-Vintage (JUnit 4) ids also come from the platform. v1 can advertise the junit-jupiter engine only and still discover vintage tests if they show up in the plan. Do not build a separate JUnit 4 runner.
-
-### Gradle and Maven
-
-The launcher needs a classpath: test classes, main classes, and dependencies. The build tool has it, a standalone jar does not.
-
-v1 is a CLI, `selective junit`, that receives the classpath and the test-classes directory. Developers can prove the protocol without a plugin.
-
-Maven, second: a Surefire provider (`SurefireProvider`) runs inside the forked JVM Surefire already created, so the classpath, `argLine`, and system properties are correct. The provider discovers, opens the session, and executes batches. This is the integration that replaces `mvn test` without asking the user to assemble a classpath. Surefire's provider API is the supported extension point (it is how the JUnit Platform provider itself is wired).
-
-Gradle, third: a plugin that replaces the `Test` task's execution with the same launcher, on the test worker Gradle already forked. Develocity does this with Gradle's internal test-executor hooks. Prefer implementing `Test.executer` only if it stays stable on the Gradle versions we declare; otherwise an init script that builds the classpath and calls the CLI is the boring path. Start with current Gradle LTS and one older LTS, not every major.
-
-Do not shell `mvn -Dtest=Class#method` per batch. That restarts the JVM and Surefire.
+The table above is the runner. The host order is Surefire first, then Gradle, same `Launcher`. `Test.executer` is the Gradle hook if it stays stable on the two LTS lines we declare; an init script that builds the classpath and calls the same launcher main is the fallback host, and it still executes unique ids in the warm test worker. JDK 17 and 21. No JDK 22+ APIs.
 
 ## Coverage (test map)
 
@@ -67,22 +69,20 @@ JaCoCo probes bytecode that ran. A constant inlined from another class may not m
 
 ## Risks
 
-- Classpath assembly is the product. A launcher that works in a unit test and cannot see a Spring context on CI is not a client. The Surefire provider is the slice that makes it real, and it should follow the CLI immediately.
-- JaCoCo class-to-source mapping for generated and multi-release jars.
-- Gradle's test worker API moves. Keep the plugin thin and the protocol in the jar.
-- JDK 17 and 21 both have to run the conformance suite. Do not use JDK 22+ APIs in the client.
-- Server full-run patterns: `pom.xml`, `build.gradle`, `build.gradle.kts`, `settings.gradle`, `gradle.lockfile`, `src/main/resources/application*.yml`, Flyway and Liquibase directories. Enterprise suites will full-run on the first select attempt until those exist, which is correct and looks like "selection did nothing."
-- Develocity customers already have a selector in-process. We will not out-integrate that in the first Java release. The CLI is for suites that do not have it.
+- The Surefire provider is the client. A unit test of `Launcher.execute` that never sees a Spring `argLine` has not finished P1 for a real build. The conformance project is a small Surefire suite with a context that fails if the JVM was not the forked one.
+- JaCoCo class-to-source mapping for generated and multi-release jars. Orchestration ships while this advertises `select`.
+- Gradle's test worker API moves. The plugin stays thin. The protocol stays in the jar.
+- JDK 17 and 21 both run the conformance suite.
+- Server full-run patterns: `pom.xml`, `build.gradle`, `build.gradle.kts`, `settings.gradle`, `gradle.lockfile`, `src/main/resources/application*.yml`, Flyway and Liquibase directories. Until those exist, an untraced change full-runs, which is the safe direction.
+- Develocity already selects inside some of these builds. The first Java client is for suites that do not have it. We do not wrap their distributor.
 
 ## Effort
 
-The JUnit Platform loop is a medium slice and the cleanest runner API of the five languages. The Surefire provider is the next slice and is what a design partner can turn on. The Gradle plugin is a third slice. JaCoCo mapping is a fourth, and until it is trustworthy the client advertises `select` (it can run a subset from a map recorded elsewhere, and it can snapshot). Recording is not required for orchestration and ordering.
-
-This is still the last client to start. The binding work is shared with the earlier languages; the cost here is the build tool.
+The launcher loop inside `SurefireProvider.invoke()` is the first slice, on JDK 17 and 21, with the `@BeforeAll` counter in that PR. The classpath-fed main is part of that slice, because it is how the mock server runs without Maven. Gradle is the next slice. JaCoCo mapping is the recording slice. Feasibility puts this language second, behind pytest, because the runner API is the one the platform already documents. The build-tool host is real work and it is the client, not a follow-up that can be skipped.
 
 ## Prior art
 
 - JUnit Platform `Launcher`, unique ids, and `TestExecutionListener`. IDEs already drive this. Copy that, and point it at the server.
 - Maven Surefire's JUnit Platform provider. Implement a sibling provider, do not wrap the `mvn` CLI.
-- Gradle `Test` task, `maxParallelForks`, and Develocity's test distributor. Forks are static. Develocity is the bar and the reason this language is last.
+- Gradle `Test` task and Develocity's test distributor. Their distribution unit is historical timing, and retries can stay in the JVM. The Selective host is the same launcher with the Selective server as the broker. `maxParallelForks` stays a CI setting.
 - JaCoCo's agent dump-and-reset, which IntelliJ and mutation-testing tools use per test.
