@@ -2,9 +2,9 @@
 
 Marketing order: first, because we can dogfood it. Feasibility of full parity: last. ExUnit is the only framework that matters. `mix test --stale` and `mix test --partitions` are local and static; they are outside the parity bar.
 
-Read [SPEC.md](SPEC.md) for the wire contract and the parity bar. This note is the adapter and the binding. [PLAN.md](PLAN.md) ranks Elixir last. Marketing order still lists it first, because we can dogfood it.
+Read [SPEC.md](SPEC.md) for the wire contract and the parity bar. This note is the adapter and the binding. [PLAN.md](PLAN.md) ranks Elixir last.
 
-**Verdict: feasible with risk. Nothing is blocked, and ExUnit does not need a fork.** The split uses public functions. On Elixir 1.19.5 / OTP 28 a second `ExUnit.run/1` re-entered `setup_all` (the count went from 1 to 2). Passing `only_test_ids` as a list runs zero tests and exits 0, because the runner calls `MapSet.member?`. `after_suite` callbacks and the formatter's end-of-suite output fire on every `ExUnit.run/1`. The adapter runs suite hooks once itself.
+**Verdict: feasible with risk. Nothing is blocked, and ExUnit does not need a fork.** The split uses public functions. On Elixir 1.19.5 / OTP 28 a second `ExUnit.run/1` re-entered `setup_all` (the count went from 1 to 2). Passing `only_test_ids` as a list logs a `FunctionClauseError` and returns 0 tests, because the runner calls `MapSet.member?`. `after_suite` callbacks and the formatter's end-of-suite output fire on every `ExUnit.run/1`. The adapter runs suite hooks once itself.
 
 ## Parity
 
@@ -12,7 +12,7 @@ Rows P4, P10–P13, P16, P19, P23–P27, and P29–P31 are the session loop in t
 
 | Id | Mechanism | Rating |
 |---|---|---|
-| P1 | `ExUnit.start(autorun: false)`, load `test_helper.exs` and the test modules the way `Mix.Tasks.Test` does, then for each assigned id `ExUnit.configure(only_test_ids: MapSet.new([{Module, :test_name}]))` and `ExUnit.run([Module])`. A list in `only_test_ids` runs zero tests and exits 0. `only_test_ids` is a documented option ("typically used by Mix to filter which tests should run"); the hexdocs type says list, and the runner checks `MapSet.member?`. `ExUnit.run/1` (since 1.14) "is often used to rerun modules already loaded in memory." One VM for the shard. The application, the Repo, and loaded modules stay up. | feasible with risk |
+| P1 | `ExUnit.start(autorun: false)`, load `test_helper.exs` and the test modules the way `Mix.Tasks.Test` does, then for each assigned id `ExUnit.configure(only_test_ids: MapSet.new([{Module, :test_name}]))` and `ExUnit.run([Module])`. A list in `only_test_ids` logs a `FunctionClauseError` and returns 0 tests. `only_test_ids` is a documented option ("typically used by Mix to filter which tests should run"); the hexdocs type says list, and the runner checks `MapSet.member?`. `ExUnit.run/1` (since 1.14) "is often used to rerun modules already loaded in memory." One VM for the shard. The application, the Repo, and loaded modules stay up. | feasible with risk |
 | P2 | Id is `Module` plus the test name atom (`ExUnit` `test_id()` is `{module, atom}`). Line numbers move when a comment is inserted; the name does not. | proven |
 | P3 | After load, read each module's registered tests (`__ex_unit__`). Bodies have not run. Empty registration exits 1. | proven |
 | P5–P7, P20 | A formatter (or the `suite_result` plus each `ExUnit.Test` state) maps `nil` to `passed`, `{:failed, _}` to `failed`, `{:skipped, _}` and `{:excluded, _}` of an assigned test to `pending`. Put the test file first in the stack. Exit 1 only when a remaining test is failed or invalid. | proven |
@@ -42,7 +42,7 @@ If the binary is missing or the Port exits before `connected`, exit 1. There is 
 
 ## Discovery and running a subset
 
-ExUnit registers tests when the test modules load. `mix test path:line` does not set `only_test_ids`. On the Mix versions read for this note (1.17.3 and 1.18.4) a path and line become `include: [location: ...]`. On current Mix, `only_test_ids` is set from `--failed` through `ExUnit.Filters.failure_info`. The adapter sets `only_test_ids` to `MapSet.new([{Module, :test_name}])` itself and calls `ExUnit.run/1` one id at a time. It leaves `ExUnit.Runner` alone.
+ExUnit registers tests when the test modules load. `mix test path:line` is `include: [location: …]` on Mix 1.17.3 through 1.20.4. `--failed` is a separate path: it sets `only_test_ids` through `ExUnit.Filters.failure_info`. The adapter sets `only_test_ids` to `MapSet.new([{Module, :test_name}])` itself and calls `ExUnit.run/1` one id at a time. It leaves `ExUnit.Runner` alone.
 
 `mix test --partitions` splits files at launch. It is outside the parity bar. So is shelling `mix test path:line` per batch: that pays Phoenix boot every time. The VM stays up.
 
@@ -74,9 +74,9 @@ This replaces the Ruby C tracer. Do not write an Elixir NIF tracer.
 
 ## Risks
 
-- A list in `only_test_ids` is a silent zero-test exit 0. The call is a `MapSet`. `setup_all` re-entry was observed on 1.19.5; the counter still has to match the number of assigned tests. `after_suite` and formatter end-of-suite fire on every `ExUnit.run/1`, so P14 is the adapter's job. `capture_log` (the docs note that `on_exit` and `setup_all` can log outside the test process) is counted in CI. This is still public API.
-- `:cover` and macros. A test that only expands a macro in another module may not mark that module. The server's untraced-file rule then full-runs, which is safe and loud.
-- Full-run patterns on the server are Ruby paths (`spec_helper`, `db/schema.rb`, `config/**`). Elixir needs its own list (`mix.exs`, `config/`, `priv/repo/migrations/`) before `select` mode is quiet. Until that ships, an untraced lockfile or config change full-runs, which is the safe default. That is a server follow-up, not a client blocker.
+- A list in `only_test_ids` logs a `FunctionClauseError` and returns 0 tests. The call is a `MapSet`. `setup_all` re-entry was observed on 1.19.5; the counter still has to match the number of assigned tests. `after_suite` and formatter end-of-suite fire on every `ExUnit.run/1`, so P14 is the adapter's job. `capture_log` (the docs note that `on_exit` and `setup_all` can log outside the test process) is counted in CI. This is still public API.
+- `:cover` and macros. A test that only expands a macro in another module may not mark that module. A changed path full-runs when no test traces it, when the path is new, or when it matches a full-run pattern. A file some other test already traced is not a full-run, so a dependency this test reached only through an unmeasured child is a skip.
+- Elixir has no language full-run list yet. Still to add: `mix.exs`, `config/`, and `priv/repo/migrations/`. A changed path full-runs when no test traces it, when the path is new, or when it matches a pattern. A file some other test already traced is not a full-run. That list is a server follow-up, not a client blocker.
 
 ## Effort
 
