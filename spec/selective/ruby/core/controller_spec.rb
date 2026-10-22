@@ -1,8 +1,39 @@
 # frozen_string_literal: true
 
+require "fileutils"
+
 RSpec.describe Selective::Ruby::Core::Controller do
+  around do |example|
+    previous_fifo = ENV["SELECTIVE_TRANSPORT_FIFO"]
+    ENV["SELECTIVE_TRANSPORT_FIFO"] = "1"
+    example.run
+  ensure
+    if previous_fifo.nil?
+      ENV.delete("SELECTIVE_TRANSPORT_FIFO")
+    else
+      ENV["SELECTIVE_TRANSPORT_FIFO"] = previous_fifo
+    end
+  end
+
+  before(:all) do
+    path = File.join(Selective::Ruby::Core::ROOT_GEM_PATH, "lib", "bin", "transport")
+    @created_transport_placeholder = false
+    unless File.exist?(path)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, "")
+      @created_transport_placeholder = true
+    end
+  end
+
+  after(:all) do
+    if @created_transport_placeholder
+      path = File.join(Selective::Ruby::Core::ROOT_GEM_PATH, "lib", "bin", "transport")
+      File.delete(path) if File.exist?(path)
+    end
+  end
+
   let(:runner_class) { class_double("runner_class", new: runner) }
-  let(:runner) { double("runner", finish: nil, exit_status: 1, framework: 'rspec', framework_version: "1.0", wrapper_version: "1.0") }
+  let(:runner) { double("runner", finish: nil, exit_status: 1, framework: "rspec", framework_version: "1.0", wrapper_version: "1.0") }
   let(:build_env) do
     {
       "host" => "wss://app.selective.ci",
@@ -165,7 +196,7 @@ RSpec.describe Selective::Ruby::Core::Controller do
       allow(controller).to receive(:puts_indented)
     end
 
-    it 'raises an error when required configuration is missing' do
+    it "raises an error when required configuration is missing" do
       controller.validate_build_env({})
       expect(controller).to have_received(:puts_indented).with(/Missing required environment variables: SELECTIVE_HOST/)
     end

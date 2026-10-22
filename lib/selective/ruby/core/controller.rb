@@ -7,6 +7,7 @@ module Selective
     module Core
       class Controller
         include Helper
+
         @@selective_suppress_reporting = false
         @@report_at_finish = {}
 
@@ -104,19 +105,36 @@ module Selective
 
         def run_main_loop
           loop do
-            message = pipe.read
-            response = JSON.parse(message, symbolize_names: true)
+            response = next_command
 
             logger.info("Received Command: #{response}")
             break if handle_command(response) == :break
           end
         end
 
+        def next_command
+          pending = @pending_commands
+          return pending.shift if pending && !pending.empty?
+
+          message = pipe.read
+          raise ConnectionLostError if message.nil?
+
+          JSON.parse(message, symbolize_names: true)
+        end
+
         # One connection: true when the run finished on it, false when it was
         # lost and the caller should reconnect.
         def connect_and_run(reconnect:)
-          @pipe = NamedPipe.new("/tmp/#{runner_id}_2", "/tmp/#{runner_id}_1")
-          @transport_pid = spawn_transport_process(reconnect: reconnect)
+          if fifo_fallback?
+            @pipe = NamedPipe.new("/tmp/#{runner_id}_2", "/tmp/#{runner_id}_1")
+            @transport_pid = spawn_transport_process(reconnect: reconnect)
+          else
+            @pipe = StdioTransport.open(
+              ensure_transport_binary!,
+              transport_url(reconnect: reconnect)
+            )
+            @transport_pid = @pipe.pid
+          end
 
           handle_termination_signals(transport_pid)
           wait_for_connectivity
@@ -125,6 +143,8 @@ module Selective
         rescue ConnectionLostError
           prepare_retry!
           false
+        ensure
+          disarm_connectivity_watchdog
         end
 
         def prepare_retry!
@@ -133,7 +153,7 @@ module Selective
           with_error_handling { raise "Too many retries" } if retries > 10
 
           puts("Retrying in #{retries} seconds...") if debug?
-          sleep(retries > 4 ? 4 : retries)
+          sleep((retries > 4) ? 4 : retries)
           kill_transport
 
           pipe.reset!
@@ -159,7 +179,7 @@ module Selective
             run_id = build_env["run_id"]
             run_attempt = build_env["run_attempt"]
 
-            metadata = build_env.reject { |k,v| %w(host runner_id api_key run_id run_attempt).include?(k) }
+            metadata = build_env.reject { |k, v| %w[host runner_id api_key run_id run_attempt].include?(k) }
 
             {
               "api_key" => api_key,
@@ -198,49 +218,56 @@ module Selective
 
           with_error_handling do
             raise "Missing required environment variables: #{missing.join(", ")}" unless missing.empty?
-            raise "Invalid host: #{env['host']}" unless env['host'].match?(/^wss?:\/\//)
+            raise "Invalid host: #{env["host"]}" unless env["host"].match?(/^wss?:\/\//)
           end
         end
 
         def spawn_transport_process(reconnect: false)
-          transport_path = File.join(ROOT_GEM_PATH, "lib", "bin", "transport")
-          get_transport_path = File.join(ROOT_GEM_PATH, "bin", "get_transport")
-
-          if !File.exist?(transport_path)
-            # The get_transport script is not released with the gem, so this
-            # code is intended for development/CI purposes.
-            if File.exist?(get_transport_path)
-              output, status = Open3.capture2e(get_transport_path)
-              if !status.success?
-                puts <<~TEXT
-                  Failed to download transport binary.
-
-                  #{output}
-                TEXT
-              end
-            else
-              with_error_handling do
-                raise "Selective transport binary not found. Please contact support or compile it manually. See: https://github.com/selectiveci/transport"
-              end
-            end
-          end
-
-          Process.spawn(transport_path, transport_url(reconnect: reconnect), runner_id).tap do |pid|
+          Process.spawn(ensure_transport_binary!, transport_url(reconnect: reconnect), runner_id).tap do |pid|
             Process.detach(pid)
           end
         end
 
-        def wait_for_connectivity
-          @connectivity = false
+        def transport_binary
+          explicit = ENV["SELECTIVE_TRANSPORT"].to_s
+          return explicit unless explicit.empty?
 
-          Thread.new do
-            sleep(30)
-            unless @connectivity
-              puts "Transport process failed to start. Exiting..."
-              kill_transport
-              exit(1)
+          File.join(ROOT_GEM_PATH, "lib", "bin", "transport")
+        end
+
+        def ensure_transport_binary!
+          path = transport_binary
+          return path if File.exist?(path)
+
+          get_transport_path = File.join(ROOT_GEM_PATH, "bin", "get_transport")
+          if ENV["SELECTIVE_TRANSPORT"].to_s.empty? && File.exist?(get_transport_path)
+            # The get_transport script is not released with the gem, so this
+            # code is intended for development/CI purposes.
+            output, status = Open3.capture2e(get_transport_path)
+            unless status.success?
+              puts <<~TEXT
+                Failed to download transport binary.
+
+                #{output}
+              TEXT
+            end
+          else
+            with_error_handling do
+              raise "Selective transport binary not found. Please contact support or compile it manually. See: https://github.com/selectiveci/transport"
             end
           end
+
+          path
+        end
+
+        def fifo_fallback?
+          %w[1 true yes].include?(ENV["SELECTIVE_TRANSPORT_FIFO"].to_s.downcase)
+        end
+
+        def wait_for_connectivity
+          @connectivity = false
+          @pending_commands = []
+          arm_connectivity_watchdog
 
           loop do
             message = pipe.read
@@ -250,9 +277,32 @@ module Selective
             next sleep(0.1) if message.nil?
 
             response = JSON.parse(message, symbolize_names: true)
-            @connectivity = true if response[:command] == "connected"
-            break
+            if response[:command] == "connected"
+              @connectivity = true
+              break
+            end
+
+            @pending_commands << response
           end
+        end
+
+        def arm_connectivity_watchdog
+          generation = (@connectivity_generation = (@connectivity_generation || 0) + 1)
+          Thread.new do
+            deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 30
+            until @connectivity || @connectivity_generation != generation
+              if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+                puts "Transport process failed to start. Exiting..."
+                kill_transport
+                exit(1)
+              end
+              Kernel.sleep(0.2)
+            end
+          end
+        end
+
+        def disarm_connectivity_watchdog
+          @connectivity_generation = (@connectivity_generation || 0) + 1
         end
 
         def handle_termination_signals(pid)
@@ -288,10 +338,12 @@ module Selective
 
             # Give up to 5 seconds for graceful exit
             # before killing it below
-            1..5.times do
+            deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
+            loop do
               Process.getpgid(transport_pid)
+              break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
 
-              sleep(1)
+              Kernel.sleep(0.05)
             end
           rescue ConnectionLostError, IOError
             # If the pipe is close, move straight to killing
@@ -308,8 +360,8 @@ module Selective
         def handle_command(data)
           if respond_to? "handle_#{data[:command]}", true
             send("handle_#{data[:command]}", data)
-          else
-            raise "Unknown command received: #{data[:command]}" if debug?
+          elsif debug?
+            raise "Unknown command received: #{data[:command]}"
           end
         end
 
@@ -428,10 +480,8 @@ module Selective
         end
 
         def modified_test_files(diff)
-          @modified_test_files ||= begin
-            diff.filter do |f|
-              f.match?(/^#{runner.base_test_path}/)
-            end
+          @modified_test_files ||= diff.filter do |f|
+            f.match?(/^#{runner.base_test_path}/)
           end
         end
 

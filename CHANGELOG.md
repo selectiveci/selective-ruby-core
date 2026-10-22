@@ -1,3 +1,10 @@
+## [0.2.15] - 2026-10-22
+- Talk to the transport over stdio by default. The runner spawns `transport --stdio` and passes the websocket URL, including the API key, in `SELECTIVE_TRANSPORT_URL` instead of on the process arguments. Server commands and client messages stay one JSON object per line, and a line containing `exit` still shuts the transport down. Requires a transport binary that implements `--stdio`.
+- Keep the legacy `/tmp/<runner_id>_1` and `_2` FIFOs for this release. Set `SELECTIVE_TRANSPORT_FIFO=1` (also `true` or `yes`) to use them.
+- Honor `SELECTIVE_TRANSPORT` as an explicit path to the transport binary.
+- Queue server commands that arrive before `connected` and apply them, in order, once `connected` arrives. A command that arrives while a batch is running is still applied only after that batch returns.
+- Stop a connect attempt's 30 second watchdog when that attempt ends, so a later reconnect is not exited by the previous attempt's timer.
+
 ## [0.2.14] - 2026-10-09
 - Tell the server when a runner is stopped by SIGTERM or SIGINT. Before exiting, the runner sends a `terminating` message naming the signal, so a run whose runners all leave this way is recorded as cancelled rather than as runners lost, and is shown and counted that way. Servers that predate the message ignore it. The runner waits 0.25s after sending so the transport can deliver it before exiting.
 
