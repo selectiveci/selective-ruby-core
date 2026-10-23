@@ -152,6 +152,20 @@ RSpec.describe "stdio controller" do
     expect(reports.first["manifest_missing"]).to be_nil
   end
 
+  it "disarms the connect watchdog before the retry backoff" do
+    stub_const("Selective::Ruby::Core::Controller::CONNECT_TIMEOUT", 0.4)
+    allow(controller).to receive(:sleep).and_call_original
+    ENV["SELECTIVE_FAKE_MODE"] = "retry_after_drop"
+    statuses = []
+    allow(controller).to receive(:exit) { |code| statuses << code }
+
+    Timeout.timeout(3) { controller.start }
+    sleep 0.6
+
+    expect(statuses).to eq([0])
+    expect(controller.retries).to eq(1)
+  end
+
   it "reconnects after the child dies and reports the retry" do
     ENV["SELECTIVE_FAKE_MODE"] = "die_after_connected"
     statuses = []

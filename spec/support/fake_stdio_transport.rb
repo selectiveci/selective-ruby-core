@@ -89,6 +89,13 @@ when "stderr"
   emit({command: "connected"})
   emit({command: "close", exit_status: nil})
   read_until_exit(report_path, state, stdin_lines) { |_message| }
+when "retry_after_drop"
+  if count == 1
+    exit 1
+  end
+  emit({command: "connected"})
+  emit({command: "close", exit_status: nil})
+  read_until_exit(report_path, state, stdin_lines) { |_message| }
 when "die_after_connected"
   emit({command: "connected"})
   if count == 1

@@ -12,6 +12,7 @@ module Selective
         @@report_at_finish = {}
 
         TERMINATION_REPORT_GRACE = 0.25
+        CONNECT_TIMEOUT = 30
 
         REQUIRED_CONFIGURATION = {
           "host" => "SELECTIVE_HOST",
@@ -140,8 +141,6 @@ module Selective
         rescue ConnectionLostError
           prepare_retry!
           false
-        ensure
-          disarm_connectivity_watchdog
         end
 
         def prepare_retry!
@@ -275,9 +274,13 @@ module Selective
         end
 
         def wait_for_connectivity
-          @connectivity = false
           @pending_commands = []
-          arm_connectivity_watchdog
+          watchdog = Thread.new do
+            Kernel.sleep(CONNECT_TIMEOUT)
+            puts "Transport process failed to start. Exiting..."
+            kill_transport
+            exit(1)
+          end
 
           loop do
             message = pipe.read
@@ -287,32 +290,12 @@ module Selective
             next sleep(0.1) if message.nil?
 
             response = JSON.parse(message, symbolize_names: true)
-            if response[:command] == "connected"
-              @connectivity = true
-              break
-            end
+            break if response[:command] == "connected"
 
             @pending_commands << response
           end
-        end
-
-        def arm_connectivity_watchdog
-          generation = (@connectivity_generation = (@connectivity_generation || 0) + 1)
-          Thread.new do
-            deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 30
-            until @connectivity || @connectivity_generation != generation
-              if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
-                puts "Transport process failed to start. Exiting..."
-                kill_transport
-                exit(1)
-              end
-              Kernel.sleep(0.2)
-            end
-          end
-        end
-
-        def disarm_connectivity_watchdog
-          @connectivity_generation = (@connectivity_generation || 0) + 1
+        ensure
+          watchdog&.kill
         end
 
         def handle_termination_signals(pid)
