@@ -323,13 +323,8 @@ module Selective
           begin
             pipe.write "exit"
 
-            # Give up to 5 seconds for graceful exit
-            # before killing it below
-            deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
-            loop do
+            100.times do
               Process.getpgid(transport_pid)
-              break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
-
               Kernel.sleep(0.05)
             end
           rescue ConnectionLostError, IOError, ThreadError
