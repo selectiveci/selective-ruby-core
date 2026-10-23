@@ -46,8 +46,6 @@ class MinimalWebSocketServer
 
   def close
     @tcp.close
-  rescue IOError
-    nil
   end
 
   private
@@ -68,10 +66,8 @@ class MinimalWebSocketServer
     length = bytes.bytesize
     header << if length < 126
       [length].pack("C")
-    elsif length < 65_536
-      [126, length].pack("Cn")
     else
-      [127, length].pack("CQ>")
+      [126, length].pack("Cn")
     end
     client.write(header)
     client.write(bytes)
