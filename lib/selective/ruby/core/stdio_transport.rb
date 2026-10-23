@@ -39,21 +39,6 @@ module Selective
           @queue.pop || raise(ConnectionLostError)
         end
 
-        def reset!
-          shutdown
-        end
-
-        def delete_pipes
-          shutdown
-        end
-
-        def alive?
-          Process.getpgid(@pid)
-          true
-        rescue Errno::ESRCH
-          false
-        end
-
         def shutdown
           request_exit
           @stdin.close
@@ -66,6 +51,9 @@ module Selective
           @reader.join(SHUTDOWN_GRACE)
           @queue.close
         end
+
+        alias_method :reset!, :shutdown
+        alias_method :delete_pipes, :shutdown
 
         private
 

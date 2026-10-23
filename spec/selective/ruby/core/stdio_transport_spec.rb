@@ -48,7 +48,6 @@ RSpec.describe Selective::Ruby::Core::StdioTransport do
       expect(JSON.parse(session.read)).to include("command" => "close")
       Timeout.timeout(3) { session.delete_pipes }
 
-      expect(session.alive?).to be(false)
       expect(session.wait_thread.value.exitstatus).to eq(0)
       expect(reports.first["stdin"]).to include(JSON.dump({type: "test_case_result", data: {id: "a"}}))
       expect(reports.first["stdin"]).to include("exit")
@@ -78,7 +77,6 @@ RSpec.describe Selective::Ruby::Core::StdioTransport do
         session.delete_pipes
       end
 
-      expect(session.alive?).to be(false)
       expect(session.wait_thread.value.exitstatus).to eq(0)
       expect(reports.first["stdin"]).to include(result, "exit")
     end
@@ -103,7 +101,7 @@ RSpec.describe Selective::Ruby::Core::StdioTransport do
 
       Timeout.timeout(3) { session.delete_pipes }
 
-      expect(session.alive?).to be(false)
+      expect(session.wait_thread).not_to be_alive
     end
 
     it "raises ConnectionLostError when writing after the child is gone" do
