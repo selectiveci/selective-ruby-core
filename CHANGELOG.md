@@ -1,4 +1,4 @@
-## [0.2.15] - 2026-10-22
+## [Unreleased]
 - Talk to the transport over stdio by default. The runner spawns `transport --stdio` and passes the websocket URL, including the API key, in `SELECTIVE_TRANSPORT_URL` instead of on the process arguments. Server commands and client messages stay one JSON object per line, and a line containing `exit` still shuts the transport down. The transport's stderr is inherited, so its own errors are visible. A binary that predates `--stdio`, such as v0.1.1 or v0.1.2, runs as the FIFO sidecar instead, with one warning per run. A binary that cannot run at all exits 1 and shows its own error.
 - Keep the legacy `/tmp/<runner_id>_1` and `_2` FIFOs for this release. Set `SELECTIVE_TRANSPORT_FIFO=1` (also `true` or `yes`) to use them.
 - Honor `SELECTIVE_TRANSPORT` as an explicit path to the transport binary.
@@ -7,6 +7,13 @@
 - Keep the stdio protocol notes (now `docs/ruby-stdio-protocol-notes.md`) out of the packaged gem.
 - Send `terminating` when SIGTERM or SIGINT arrives in the middle of a write. One writer thread sends every frame to the transport's stdin in order. Writes, the signal handler's included, only queue frames, so `terminating` goes out right after the frame the signal interrupted instead of failing to take the pipe.
 - Queue server commands that arrive before `connected` and apply them, in order, once `connected` arrives. A command that arrives while a batch is running is still applied only after that batch returns.
+
+## [0.2.15] - 2026-10-23
+- Bundle transport 0.1.2:
+  - Large test manifests no longer stall on the way to the server. Delivery used to slow down quadratically with message size; an 8 MB manifest now arrives in milliseconds.
+  - Linux binaries are static, so they run on any distribution regardless of its glibc, including Alpine and distributions older than glibc 2.28.
+  - Messages written just before the runner stops reach the server first, and the connection closes cleanly. Pings from the server no longer reach the runner as unreadable lines.
+  - The transport can move its own connection when the server asks, so a runner busy in a long test keeps its run when a server node is replaced. This takes effect once the server supports it; until then nothing changes.
 
 ## [0.2.14] - 2026-10-09
 - Tell the server when a runner is stopped by SIGTERM or SIGINT. Before exiting, the runner sends a `terminating` message naming the signal, so a run whose runners all leave this way is recorded as cancelled rather than as runners lost, and is shown and counted that way. Servers that predate the message ignore it. The runner waits 0.25s after sending so the transport can deliver it before exiting.
