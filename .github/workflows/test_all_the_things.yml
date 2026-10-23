@@ -52,8 +52,6 @@ jobs:
         shell: bash
         env:
           SELECTIVE_TEST_MAP_DISABLE: "1"
-          SELECTIVE_TRANSPORT: ${{ github.workspace }}/lib/bin/transport
-          SELECTIVE_TRANSPORT_BIN: ${{ github.workspace }}/lib/bin/transport
           WITHOUT_SELECTIVE: ${{ inputs.without_selective || secrets.SELECTIVE_API_KEY == '' }}
           RUNNER: ${{ matrix.runners }}
         run: |

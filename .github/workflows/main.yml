@@ -38,9 +38,6 @@ jobs:
           runner-id: ${{ matrix.ci_node_index }}
 
       - name: Run the default task
-        env:
-          SELECTIVE_TRANSPORT: ${{ github.workspace }}/lib/bin/transport
-          SELECTIVE_TRANSPORT_BIN: ${{ github.workspace }}/lib/bin/transport
         run: bundle exec selective rspec --log
 
       - name: Store logs
