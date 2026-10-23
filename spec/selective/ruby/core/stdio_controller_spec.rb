@@ -65,6 +65,8 @@ RSpec.describe "stdio controller" do
     allow(controller).to receive(:handle_termination_signals)
     allow(Selective::Ruby::Core::Controller).to receive(:restore_reporting!)
     allow(runner).to receive(:run_test_cases) do |ids|
+      expect(File.exist?("/tmp/#{build_env["runner_id"]}_1")).to be(false)
+      expect(File.exist?("/tmp/#{build_env["runner_id"]}_2")).to be(false)
       batch_state[:in_batch] = true
       events << [:run, ids.dup]
       batches << ids.dup
@@ -117,8 +119,6 @@ RSpec.describe "stdio controller" do
     reports.each do |report|
       expect(report["stdin"]).to include("exit")
     end
-    expect(File.exist?("/tmp/stdio-runner_1")).to be(false)
-    expect(File.exist?("/tmp/stdio-runner_2")).to be(false)
     reports.each do |report|
       expect { Process.getpgid(report["pid"]) }.to raise_error(Errno::ESRCH)
     end
@@ -201,8 +201,6 @@ RSpec.describe "stdio controller" do
     reports.each do |report|
       expect { Process.getpgid(report["pid"]) }.to raise_error(Errno::ESRCH)
     end
-    expect(File.exist?("/tmp/stdio-runner_1")).to be(false)
-    expect(File.exist?("/tmp/stdio-runner_2")).to be(false)
   end
 
   it "parses stdout when the transport writes logs to stderr" do
