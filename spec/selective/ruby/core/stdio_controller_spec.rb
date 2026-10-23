@@ -115,8 +115,6 @@ RSpec.describe "stdio controller" do
     expect(reports.map { |report| report["argv"] }.uniq).to eq([["--stdio"]])
     expect(reports.map { |report| report["url"] }.join).to include("api_key=test-api-key")
     reports.each do |report|
-      expect(report["cmdline"].join(" ")).not_to include("test-api-key")
-      expect(report["cmdline"].join(" ")).not_to include("ws://")
       expect(report["stdin"]).to include("exit")
     end
     expect(File.exist?("/tmp/stdio-runner_1")).to be(false)

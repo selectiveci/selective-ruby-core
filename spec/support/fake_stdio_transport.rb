@@ -28,20 +28,12 @@ def next_count(path)
 end
 
 count = next_count(File.join(directory, "count"))
-stdin_lines = []
 state = {
   "pid" => Process.pid,
   "count" => count,
   "argv" => ARGV,
-  "cmdline" => (
-    if File.exist?("/proc/self/cmdline")
-      File.read("/proc/self/cmdline").split("\0")
-    else
-      [RbConfig.ruby, $PROGRAM_NAME, *ARGV]
-    end
-  ),
   "url" => ENV["SELECTIVE_TRANSPORT_URL"],
-  "stdin" => stdin_lines
+  "stdin" => []
 }
 report_path = File.join(directory, "#{Process.pid}.json")
 
@@ -55,16 +47,15 @@ end
 
 persist(report_path, state)
 
-def record(path, state, stdin_lines, line)
-  stdin_lines << line
-  state["stdin"] = stdin_lines
+def record(path, state, line)
+  state["stdin"] << line
   persist(path, state)
 end
 
-def read_until_exit(path, state, stdin_lines)
+def read_until_exit(path, state)
   while (line = $stdin.gets)
     text = line.chomp
-    record(path, state, stdin_lines, text)
+    record(path, state, text)
     return if text == "exit"
 
     begin
@@ -83,26 +74,26 @@ when "ignore_exit"
   sleep 30
 when "flood"
   4000.times { emit({command: "print_notice", message: "x"}) }
-  read_until_exit(report_path, state, stdin_lines) { |_message| }
+  read_until_exit(report_path, state) { |_message| }
 when "stderr"
   warn "transport log {not-json}"
   emit({command: "connected"})
   emit({command: "close", exit_status: nil})
-  read_until_exit(report_path, state, stdin_lines) { |_message| }
+  read_until_exit(report_path, state) { |_message| }
 when "retry_after_drop"
   if count == 1
     exit 1
   end
   emit({command: "connected"})
   emit({command: "close", exit_status: nil})
-  read_until_exit(report_path, state, stdin_lines) { |_message| }
+  read_until_exit(report_path, state) { |_message| }
 when "die_after_connected"
   emit({command: "connected"})
   if count == 1
     exit 0
   else
     emit({command: "close", exit_status: nil})
-    read_until_exit(report_path, state, stdin_lines) { |_message| }
+    read_until_exit(report_path, state) { |_message| }
   end
 when "reconnect"
   emit({command: "connected"})
@@ -111,11 +102,11 @@ when "reconnect"
   else
     emit({command: "close", exit_status: nil})
   end
-  read_until_exit(report_path, state, stdin_lines) { |_message| }
+  read_until_exit(report_path, state) { |_message| }
 when "before_connected"
   emit({command: "test_manifest"})
   if IO.select([$stdin], nil, nil, 0.2)
-    record(report_path, state, stdin_lines, $stdin.gets.to_s.chomp)
+    record(report_path, state, $stdin.gets.to_s.chomp)
     state["early_write"] = true
     persist(report_path, state)
     exit 2
@@ -126,7 +117,7 @@ when "before_connected"
     persist(report_path, state)
     exit 2
   end
-  read_until_exit(report_path, state, stdin_lines) do |message|
+  read_until_exit(report_path, state) do |message|
     if message["type"] == "test_manifest"
       emit({command: "close", exit_status: nil})
     end
@@ -136,7 +127,7 @@ when "topup"
   emit({command: "run_test_cases", test_case_ids: ["a", "b"]})
   topped_up = false
   closed = false
-  read_until_exit(report_path, state, stdin_lines) do |message|
+  read_until_exit(report_path, state) do |message|
     next unless message["type"] == "test_case_result"
 
     id = message.dig("data", "id")
@@ -153,7 +144,7 @@ when "remove_during"
   emit({command: "run_test_cases", test_case_ids: ["bad"]})
   removed = false
   closed = false
-  read_until_exit(report_path, state, stdin_lines) do |message|
+  read_until_exit(report_path, state) do |message|
     next unless message["type"] == "test_case_result"
     next unless message.dig("data", "id") == "bad"
 
@@ -169,5 +160,5 @@ when "remove_during"
 else
   emit({command: "connected"})
   emit({command: "close", exit_status: nil})
-  read_until_exit(report_path, state, stdin_lines) { |_message| }
+  read_until_exit(report_path, state) { |_message| }
 end

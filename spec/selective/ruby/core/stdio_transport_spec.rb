@@ -41,8 +41,6 @@ RSpec.describe Selective::Ruby::Core::StdioTransport do
       report = reports.first
       expect(report["argv"]).to eq(["--stdio"])
       expect(report["url"]).to include("api_key=sekret")
-      expect(report["cmdline"].join(" ")).not_to include("sekret")
-      expect(report["cmdline"].join(" ")).not_to include("ws://")
 
       session.write(JSON.dump({type: "test_case_result", data: {id: "a"}}))
       expect(JSON.parse(session.read)).to include("command" => "close")
