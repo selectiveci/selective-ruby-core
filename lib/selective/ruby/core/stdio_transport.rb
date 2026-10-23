@@ -26,26 +26,17 @@ module Selective
           @wait_thread = wait_thread
           @pid = wait_thread.pid
           @queue = Queue.new
-          @shut_down = false
           @reader = Thread.new { read_stdout }
         end
 
         def write(message)
-          io = @stdin
-          raise ConnectionLostError if io.nil? || io.closed?
-
-          io.write("#{message}\n")
-        rescue Errno::EPIPE, Errno::ECONNRESET, Errno::EBADF, IOError
+          @stdin.write("#{message}\n")
+        rescue Errno::EPIPE, IOError
           raise ConnectionLostError
         end
 
         def read
-          message = @queue.pop
-          raise ConnectionLostError if message.nil?
-
-          message
-        rescue ClosedQueueError
-          raise ConnectionLostError
+          @queue.pop || raise(ConnectionLostError)
         end
 
         def reset!
@@ -64,18 +55,15 @@ module Selective
         end
 
         def shutdown
-          return if @shut_down
-
-          @shut_down = true
           request_exit
-          close_io(@stdin)
+          @stdin.close
           reaped = @wait_thread.join(SHUTDOWN_GRACE)
           unless reaped
             terminate_child
             @wait_thread.join(SHUTDOWN_GRACE)
           end
-          close_io(@stdout)
-          @reader&.join(SHUTDOWN_GRACE)
+          @stdout.close
+          @reader.join(SHUTDOWN_GRACE)
           @queue.close
         end
 
@@ -85,7 +73,7 @@ module Selective
           while (line = @stdout.gets)
             @queue << line.chomp
           end
-        rescue IOError, Errno::EBADF, ClosedQueueError
+        rescue IOError, ClosedQueueError
           nil
         ensure
           @queue.close
@@ -100,14 +88,6 @@ module Selective
         def terminate_child
           Process.kill("TERM", @pid)
         rescue Errno::ESRCH
-          nil
-        end
-
-        def close_io(io)
-          return if io.nil? || io.closed?
-
-          io.close
-        rescue IOError, Errno::EBADF
           nil
         end
       end
