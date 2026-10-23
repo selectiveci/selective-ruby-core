@@ -1,17 +1,7 @@
 # frozen_string_literal: true
 
 RSpec.describe Selective::Ruby::Core::Controller do
-  around do |example|
-    previous_fifo = ENV["SELECTIVE_TRANSPORT_FIFO"]
-    ENV["SELECTIVE_TRANSPORT_FIFO"] = "1"
-    example.run
-  ensure
-    if previous_fifo.nil?
-      ENV.delete("SELECTIVE_TRANSPORT_FIFO")
-    else
-      ENV["SELECTIVE_TRANSPORT_FIFO"] = previous_fifo
-    end
-  end
+  around { |example| with_env("SELECTIVE_TRANSPORT_FIFO" => "1") { example.run } }
 
   let(:runner_class) { class_double("runner_class", new: runner) }
   let(:runner) { double("runner", finish: nil, exit_status: 1, framework: "rspec", framework_version: "1.0", wrapper_version: "1.0") }

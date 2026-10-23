@@ -127,12 +127,10 @@ RSpec.describe "transport --stdio binary" do
     allow(controller).to receive(:sleep)
     statuses = []
     allow(controller).to receive(:exit) { |code| statuses << code }
-    previous_transport = ENV["SELECTIVE_TRANSPORT"]
-    previous_fifo = ENV["SELECTIVE_TRANSPORT_FIFO"]
-    ENV["SELECTIVE_TRANSPORT"] = binary
-    ENV.delete("SELECTIVE_TRANSPORT_FIFO")
 
-    Timeout.timeout(8) { controller.start }
+    with_env("SELECTIVE_TRANSPORT" => binary, "SELECTIVE_TRANSPORT_FIFO" => nil) do
+      Timeout.timeout(8) { controller.start }
+    end
     driver.join(2)
 
     received = []
@@ -150,13 +148,6 @@ RSpec.describe "transport --stdio binary" do
     pid = controller.transport_pid
     expect { Process.getpgid(pid) }.to raise_error(Errno::ESRCH)
   ensure
-    ENV["SELECTIVE_TRANSPORT"] = previous_transport if defined?(previous_transport) && previous_transport
-    ENV.delete("SELECTIVE_TRANSPORT") if defined?(previous_transport) && previous_transport.nil?
-    if defined?(previous_fifo) && previous_fifo
-      ENV["SELECTIVE_TRANSPORT_FIFO"] = previous_fifo
-    elsif defined?(previous_fifo)
-      ENV.delete("SELECTIVE_TRANSPORT_FIFO")
-    end
     server&.close
     driver&.kill
   end
