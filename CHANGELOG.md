@@ -1,3 +1,10 @@
+## [0.2.15] - 2026-10-23
+- Bundle transport 0.1.3:
+  - Large test manifests no longer stall on the way to the server. Delivery used to slow down quadratically with message size; an 8 MB manifest now arrives in milliseconds.
+  - Linux binaries are static, so they run on any distribution regardless of its glibc, including Alpine and distributions older than glibc 2.28.
+  - Messages written just before the runner stops reach the server first, and the connection closes cleanly. Pings from the server no longer reach the runner as unreadable lines.
+  - The transport can move its own connection when the server asks, so a runner busy in a long test keeps its run when a server node is replaced. This takes effect once the server supports it; until then nothing changes.
+
 ## [0.2.14] - 2026-10-09
 - Tell the server when a runner is stopped by SIGTERM or SIGINT. Before exiting, the runner sends a `terminating` message naming the signal, so a run whose runners all leave this way is recorded as cancelled rather than as runners lost, and is shown and counted that way. Servers that predate the message ignore it. The runner waits 0.25s after sending so the transport can deliver it before exiting.
 
