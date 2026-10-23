@@ -69,6 +69,9 @@ end
 case mode
 when "refuse"
   exit 1
+when "slow_reader"
+  sleep 0.3
+  read_until_exit(report_path, state) { |_message| }
 when "ignore_exit"
   trap("TERM") { exit! 0 }
   sleep 30

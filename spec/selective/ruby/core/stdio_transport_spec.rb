@@ -113,6 +113,26 @@ RSpec.describe Selective::Ruby::Core::StdioTransport do
       end
     end
 
+    it "sends a frame written from a signal handler after the write it interrupted" do
+      ENV["SELECTIVE_FAKE_MODE"] = "slow_reader"
+      session = described_class.open(fake_transport, "ws://example.test/socket")
+      big = JSON.dump({type: "test_case_result", data: {pad: "x" * 1_000_000}})
+      terminating = JSON.dump({type: "terminating", data: {signal: "USR1"}})
+      previous = Signal.trap("USR1") { session.write(terminating) }
+      Thread.new do
+        sleep 0.1
+        Process.kill("USR1", Process.pid)
+      end
+
+      session.write(big)
+      sleep 0.5
+      Timeout.timeout(5) { session.delete_pipes }
+
+      expect(reports.first["stdin"]).to eq([big, terminating])
+    ensure
+      Signal.trap("USR1", previous || "DEFAULT")
+    end
+
     it "raises ConnectionLostError when writing after the child is gone" do
       ENV["SELECTIVE_FAKE_MODE"] = "die_after_connected"
       session = described_class.open(fake_transport, "ws://example.test/socket?api_key=sekret")

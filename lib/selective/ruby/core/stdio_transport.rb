@@ -26,12 +26,16 @@ module Selective
           @wait_thread = wait_thread
           @pid = wait_thread.pid
           @queue = Queue.new
+          @outbox = Queue.new
           @reader = Thread.new { read_stdout }
+          @writer = Thread.new { write_stdin }
         end
 
         def write(message)
-          @stdin.write("#{message}\n")
-        rescue Errno::EPIPE, IOError
+          raise ConnectionLostError if @lost || !@wait_thread.alive?
+
+          @outbox << "#{message}\n"
+        rescue ClosedQueueError
           raise ConnectionLostError
         end
 
@@ -40,6 +44,8 @@ module Selective
         end
 
         def shutdown
+          @outbox.close
+          @writer.join(SHUTDOWN_GRACE)
           @stdin.close
           reaped = @wait_thread.join(SHUTDOWN_GRACE)
           unless reaped
@@ -64,6 +70,14 @@ module Selective
           nil
         ensure
           @queue.close
+        end
+
+        def write_stdin
+          while (frame = @outbox.pop)
+            @stdin.write(frame)
+          end
+        rescue Errno::EPIPE, IOError
+          @lost = true
         end
 
         def terminate_child

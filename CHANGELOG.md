@@ -2,6 +2,7 @@
 - Talk to the transport over stdio by default. The runner spawns `transport --stdio` and passes the websocket URL, including the API key, in `SELECTIVE_TRANSPORT_URL` instead of on the process arguments. Server commands and client messages stay one JSON object per line, and a line containing `exit` still shuts the transport down. The transport's stderr is inherited, so its own errors are visible. A binary that predates `--stdio`, such as v0.1.1 or v0.1.2, runs as the FIFO sidecar instead, with one warning per run. A binary that cannot run at all exits 1 and shows its own error.
 - Keep the legacy `/tmp/<runner_id>_1` and `_2` FIFOs for this release. Set `SELECTIVE_TRANSPORT_FIFO=1` (also `true` or `yes`) to use them.
 - Honor `SELECTIVE_TRANSPORT` as an explicit path to the transport binary.
+- Send `terminating` when SIGTERM or SIGINT arrives in the middle of a write. One writer thread sends every frame to the transport's stdin in order. Writes, the signal handler's included, only queue frames, so `terminating` goes out right after the frame the signal interrupted instead of failing to take the pipe.
 - Queue server commands that arrive before `connected` and apply them, in order, once `connected` arrives. A command that arrives while a batch is running is still applied only after that batch returns.
 
 ## [0.2.14] - 2026-10-09
