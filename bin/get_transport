@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-TRANSPORT_REF="${SELECTIVE_TRANSPORT_REF:-c728f92e64009329cfab7d85e6de37e90416e805}"
+TRANSPORT_REF=c728f92e64009329cfab7d85e6de37e90416e805
 
 os=${1:-$(uname -s)}
 arch=${2:-$(uname -m)}
@@ -16,19 +16,17 @@ if [ "$os" != "Darwin" ] && [ "$os" != "Linux" ]; then
   exit 1
 fi
 
-if { [ "$os" = "Darwin" ] && [ "$arch" != "aarch64" ] && [ "$arch" != "x86_64" ]; } ||
-   { [ "$os" = "Linux" ] && [ "$arch" != "aarch64" ] && [ "$arch" != "x86_64" ]; }; then
+if [ "$arch" != "aarch64" ] && [ "$arch" != "x86_64" ]; then
   echo "Unsupported Architecture" >&2
   exit 1
 fi
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 dest="$root/lib/bin"
-mkdir -p "$dest"
+mkdir -p "$dest" "$root/tmp"
 
 if [[ "$TRANSPORT_REF" == v* ]]; then
   archive="$root/tmp/transport.tar.gz"
-  mkdir -p "$root/tmp"
   curl -L --fail --silent --show-error \
     "https://github.com/selectiveci/transport/releases/download/${TRANSPORT_REF}/transport-${os}-${arch}.tar.gz" \
     -o "$archive"
@@ -49,7 +47,6 @@ if [ "$os" != "$host_os" ] || [ "$arch" != "$host_arch" ]; then
 fi
 
 src="$root/tmp/transport-src"
-mkdir -p "$root/tmp"
 if [ ! -d "$src/.git" ]; then
   git init -q "$src"
   git -C "$src" remote add origin https://github.com/selectiveci/transport
