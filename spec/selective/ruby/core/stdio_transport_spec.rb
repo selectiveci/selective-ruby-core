@@ -14,22 +14,13 @@ RSpec.describe Selective::Ruby::Core::StdioTransport do
   end
 
   around do |example|
-    with_env(
-      "SELECTIVE_TRANSPORT" => fake_transport,
-      "SELECTIVE_TRANSPORT_FIFO" => nil,
-      "SELECTIVE_FAKE_MODE" => ENV["SELECTIVE_FAKE_MODE"],
-      "SELECTIVE_FAKE_DIR" => directory
-    ) { example.run }
+    with_env("SELECTIVE_FAKE_MODE" => nil, "SELECTIVE_FAKE_DIR" => directory) { example.run }
   ensure
     FileUtils.rm_rf(directory) if directory
   end
 
   def reports
     Dir[File.join(directory, "*.json")].map { |path| JSON.parse(File.read(path)) }
-  end
-
-  def fifo_paths(runner_id)
-    ["/tmp/#{runner_id}_1", "/tmp/#{runner_id}_2"]
   end
 
   describe "framing" do
