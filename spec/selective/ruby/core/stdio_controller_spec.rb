@@ -196,11 +196,11 @@ RSpec.describe "stdio controller" do
     ENV["SELECTIVE_FAKE_MODE"] = "refuse"
     allow(controller).to receive(:exit).with(1).and_raise(SystemExit.new(1))
 
-    expect { Timeout.timeout(5) { controller.start } }.to raise_error(SystemExit)
+    expect { Timeout.timeout(30) { controller.start } }.to raise_error(SystemExit)
     expect(controller.retries).to eq(11)
     expect(reports.size).to eq(11)
     reports.each do |report|
-      expect { Process.getpgid(report["pid"]) }.to raise_error(Errno::ESRCH)
+      expect { Timeout.timeout(5) { loop { Process.getpgid(report["pid"]) && sleep(0.05) } } }.to raise_error(Errno::ESRCH)
     end
   end
 

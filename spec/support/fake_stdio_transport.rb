@@ -72,6 +72,9 @@ when "refuse"
 when "slow_reader"
   sleep 0.3
   read_until_exit(report_path, state) { |_message| }
+when "ignore_term"
+  trap("TERM", "IGNORE")
+  sleep 30
 when "ignore_exit"
   trap("TERM") { exit! 0 }
   sleep 30

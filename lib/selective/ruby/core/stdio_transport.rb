@@ -47,11 +47,12 @@ module Selective
           @outbox.close
           @writer.join(SHUTDOWN_GRACE)
           @stdin.close
-          reaped = @wait_thread.join(SHUTDOWN_GRACE)
-          unless reaped
-            terminate_child
-            @wait_thread.join(SHUTDOWN_GRACE)
+          %w[TERM KILL].each do |signal|
+            break if @wait_thread.join(SHUTDOWN_GRACE)
+
+            signal_child(signal)
           end
+          @wait_thread.join
           @stdout.close
           @reader.join(SHUTDOWN_GRACE)
           @queue.close
@@ -80,8 +81,8 @@ module Selective
           @lost = true
         end
 
-        def terminate_child
-          Process.kill("TERM", @pid)
+        def signal_child(signal)
+          Process.kill(signal, @pid)
         rescue Errno::ESRCH
           nil
         end

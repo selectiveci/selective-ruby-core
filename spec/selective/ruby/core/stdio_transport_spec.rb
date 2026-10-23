@@ -92,6 +92,16 @@ RSpec.describe Selective::Ruby::Core::StdioTransport do
       expect(session.wait_thread).not_to be_alive
     end
 
+    it "kills a child that ignores TERM" do
+      ENV["SELECTIVE_FAKE_MODE"] = "ignore_term"
+      session = described_class.open(fake_transport, "ws://example.test/socket?api_key=sekret")
+      sleep 0.3
+
+      Timeout.timeout(5) { session.delete_pipes }
+
+      expect(session.wait_thread.value.termsig).to eq(Signal.list["KILL"])
+    end
+
     it "returns from shutdown when the child never reads a full stdin" do
       script = File.join(directory, "deaf")
       File.write(script, "#!/usr/bin/env ruby\nsleep 30\n")

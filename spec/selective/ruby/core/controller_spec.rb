@@ -264,6 +264,16 @@ RSpec.describe Selective::Ruby::Core::Controller do
         expect(exit_status_on("TERM")).to eq(0)
       end
 
+      it "finishes the runner and lets exit reject a close status that is not an integer" do
+        allow(controller).to receive(:write)
+        allow(controller).to receive(:upload_test_map)
+        allow(runner).to receive(:finish)
+        allow(pipe).to receive(:delete_pipes)
+
+        expect { controller.handle_close({exit_status: "1"}) }.to raise_error(TypeError)
+        expect(runner).to have_received(:finish)
+      end
+
       it "kills the transport when the exit line cannot be written" do
         allow(controller).to receive(:kill_transport).and_call_original
         allow(Process).to receive(:kill)
