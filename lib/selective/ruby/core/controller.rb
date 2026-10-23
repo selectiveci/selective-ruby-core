@@ -146,7 +146,7 @@ module Selective
           with_error_handling { raise "Too many retries" } if retries > 10
 
           puts("Retrying in #{retries} seconds...") if debug?
-          sleep((retries > 4) ? 4 : retries)
+          sleep([retries, 4].min)
           kill_transport
 
           pipe.reset!
