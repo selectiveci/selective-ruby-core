@@ -40,7 +40,6 @@ module Selective
         end
 
         def shutdown
-          request_exit
           @stdin.close
           reaped = @wait_thread.join(SHUTDOWN_GRACE)
           unless reaped
@@ -65,12 +64,6 @@ module Selective
           nil
         ensure
           @queue.close
-        end
-
-        def request_exit
-          write("exit")
-        rescue ConnectionLostError
-          nil
         end
 
         def terminate_child

@@ -48,7 +48,6 @@ RSpec.describe Selective::Ruby::Core::StdioTransport do
 
       expect(session.wait_thread.value.exitstatus).to eq(0)
       expect(reports.first["stdin"]).to include(JSON.dump({type: "test_case_result", data: {id: "a"}}))
-      expect(reports.first["stdin"]).to include("exit")
     end
 
     it "keeps the transport log out of the command stream and on the parent's stderr" do
@@ -76,7 +75,7 @@ RSpec.describe Selective::Ruby::Core::StdioTransport do
       end
 
       expect(session.wait_thread.value.exitstatus).to eq(0)
-      expect(reports.first["stdin"]).to include(result, "exit")
+      expect(reports.first["stdin"]).to include(result)
     end
 
     it "raises when the child exits and does not leave a zombie" do
@@ -100,6 +99,27 @@ RSpec.describe Selective::Ruby::Core::StdioTransport do
       Timeout.timeout(3) { session.delete_pipes }
 
       expect(session.wait_thread).not_to be_alive
+    end
+
+    it "returns from shutdown when the child never reads a full stdin" do
+      script = File.join(directory, "deaf")
+      File.write(script, "#!/usr/bin/env ruby\nsleep 30\n")
+      File.chmod(0o755, script)
+      session = described_class.open(script, "ws://example.test/socket")
+      pid = session.pid
+      io = session.instance_variable_get(:@stdin)
+      chunk = "x" * 65_536
+      8.times do
+        break if io.write_nonblock(chunk, exception: false) == :wait_writable
+      end
+
+      Timeout.timeout(3) { session.shutdown }
+    ensure
+      begin
+        Process.kill("KILL", pid) if pid
+      rescue Errno::ESRCH
+        nil
+      end
     end
 
     it "raises ConnectionLostError when writing after the child is gone" do
