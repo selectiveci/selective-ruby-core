@@ -11,7 +11,7 @@ on:
 
 jobs:
   multi-ruby-rspec:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     name: Ruby ${{ matrix.ruby }}
     strategy:
       fail-fast: false
@@ -85,8 +85,9 @@ jobs:
           path: example-counts/
 
   every-cell-ran-the-suite:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: multi-ruby-rspec
+    if: ${{ !cancelled() }}
     steps:
       - uses: actions/checkout@v6
 
@@ -98,4 +99,9 @@ jobs:
 
       - name: Fail if any Ruby ran less than the full suite
         shell: bash
-        run: .github/scripts/check_cell_totals example-counts 2
+        run: |
+          workflow=.github/workflows/test_all_the_things.yml
+          matrix=.jobs.multi-ruby-rspec.strategy.matrix
+          mapfile -t rubies < <(yq "$matrix.ruby[]" "$workflow")
+          .github/scripts/check_cell_totals example-counts \
+            "$(yq "$matrix.runners | length" "$workflow")" "${rubies[@]}"
