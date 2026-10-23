@@ -31,6 +31,7 @@ module Selective
           @log = log
           @runner = runner_class.new(runner_args, method(:test_case_callback))
           @retries = 0
+          @pending_commands = []
         end
 
         # A lost connection is retried by looping here, not by calling start
@@ -114,13 +115,9 @@ module Selective
         end
 
         def next_command
-          pending = @pending_commands
-          return pending.shift if pending && !pending.empty?
+          return @pending_commands.shift if @pending_commands.any?
 
-          message = pipe.read
-          raise ConnectionLostError if message.nil?
-
-          JSON.parse(message, symbolize_names: true)
+          JSON.parse(pipe.read, symbolize_names: true)
         end
 
         # One connection: true when the run finished on it, false when it was
