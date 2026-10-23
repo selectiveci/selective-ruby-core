@@ -26,6 +26,11 @@ jobs:
           ruby-version: "4.0"
           bundler-cache: true
 
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build the pinned transport
+        run: bash bin/get_transport
+
       - name: Setup Selective
         uses: selectiveci/setup-selective@v1
         with:
@@ -33,6 +38,9 @@ jobs:
           runner-id: ${{ matrix.ci_node_index }}
 
       - name: Run the default task
+        env:
+          SELECTIVE_TRANSPORT: ${{ github.workspace }}/lib/bin/transport
+          SELECTIVE_TRANSPORT_BIN: ${{ github.workspace }}/lib/bin/transport
         run: bundle exec selective rspec --log
 
       - name: Store logs

@@ -61,26 +61,33 @@ RSpec.describe Selective::Ruby::Core::StdioTransport do
       expect(reports.first["stdin"]).to include("exit")
     end
 
-    it "keeps stderr out of the command stream and drains a flooded stdout" do
+    it "keeps the transport log out of the command stream and on the parent's stderr" do
       ENV["SELECTIVE_FAKE_MODE"] = "stderr"
       session = described_class.open(fake_transport, "ws://example.test/socket?api_key=sekret")
 
-      expect(JSON.parse(session.read)["command"]).to eq("connected")
-      expect(session.stderr_lines.join).to include("not-json")
+      command = JSON.parse(session.read)
+      expect(command["command"]).to eq("connected")
+      expect(command.to_s).not_to include("not-json")
+      if File.exist?("/proc/self/fd/2")
+        expect(File.readlink("/proc/#{session.pid}/fd/2")).to eq(File.readlink("/proc/self/fd/2"))
+      end
       Timeout.timeout(3) { session.delete_pipes }
     end
 
     it "does not deadlock when the child fills stdout before reading stdin" do
       ENV["SELECTIVE_FAKE_MODE"] = "flood"
+      result = JSON.dump({type: "test_case_result", data: {id: "a"}})
       session = described_class.open(fake_transport, "ws://example.test/socket?api_key=sekret")
 
       Timeout.timeout(5) do
         expect(JSON.parse(session.read)["command"]).to eq("print_notice")
-        session.write(JSON.dump({type: "test_case_result", data: {id: "a"}}))
+        session.write(result)
         session.delete_pipes
       end
 
       expect(session.alive?).to be(false)
+      expect(session.wait_thread.value.exitstatus).to eq(0)
+      expect(reports.first["stdin"]).to include(result, "exit")
     end
 
     it "raises when the child exits and does not leave a zombie" do

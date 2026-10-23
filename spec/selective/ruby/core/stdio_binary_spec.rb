@@ -6,7 +6,13 @@ require "timeout"
 require_relative "../../../support/minimal_websocket_server"
 
 RSpec.describe "transport --stdio binary" do
-  let(:binary) { ENV.fetch("SELECTIVE_TRANSPORT_BIN", "/tmp/transport/target/release/transport") }
+  let(:binary) do
+    ENV["SELECTIVE_TRANSPORT_BIN"] ||
+      [
+        "/tmp/transport/target/release/transport",
+        File.expand_path("../../../../lib/bin/transport", __dir__)
+      ].find { |path| File.executable?(path) }
+  end
   let(:build_env_base) do
     {
       "api_key" => "test-api-key",
@@ -22,11 +28,23 @@ RSpec.describe "transport --stdio binary" do
   end
 
   before do
-    skip "transport binary with --stdio is not built at #{binary}" unless usable_binary?
+    next if usable_binary?
+
+    message = "transport binary with --stdio is not available (looked at #{binary.inspect}). Set SELECTIVE_TRANSPORT_BIN."
+    raise message if ENV["CI"]
+
+    skip message
   end
 
   def usable_binary?
-    File.executable?(binary) && `#{binary} --help 2>&1`.include?("--stdio")
+    !binary.nil? && File.executable?(binary) && `#{binary} --help 2>&1`.include?("--stdio")
+  end
+
+  def command_line(pid)
+    path = "/proc/#{pid}/cmdline"
+    return unless File.exist?(path)
+
+    File.read(path).split("\0")
   end
 
   def fifos
@@ -42,9 +60,9 @@ RSpec.describe "transport --stdio binary" do
       binary,
       "ws://127.0.0.1:1/transport/websocket?api_key=test-api-key"
     )
-    cmdline = File.read("/proc/#{session.pid}/cmdline").split("\0")
+    cmdline = command_line(session.pid)
 
-    expect(cmdline).to eq([binary, "--stdio"])
+    expect(cmdline).to eq([binary, "--stdio"]) if cmdline
     Timeout.timeout(3) do
       expect { session.read }.to raise_error(Selective::Ruby::Core::ConnectionLostError)
     end
@@ -98,7 +116,7 @@ RSpec.describe "transport --stdio binary" do
     runner_class = class_double("runner_class", new: runner)
     controller = dirty_dirty_unprivate_class(Selective::Ruby::Core::Controller).new(runner_class, nil)
     allow(runner).to receive(:run_test_cases) do |ids|
-      captured[:cmdline] ||= File.read("/proc/#{controller.transport_pid}/cmdline").split("\0")
+      captured[:cmdline] ||= command_line(controller.transport_pid)
       ran << ids.dup
       ids.each do |id|
         controller.test_case_callback({id: id, status: "passed"})
@@ -126,7 +144,7 @@ RSpec.describe "transport --stdio binary" do
     expect(received.map { |message| message["type"] }).to include("report_at_finish")
     expect(statuses).to eq([0])
     expect(fifos - before_fifos).to eq([])
-    expect(captured[:cmdline]).to eq([binary, "--stdio"])
+    expect(captured[:cmdline]).to eq([binary, "--stdio"]) if captured[:cmdline]
     expect(File.exist?("/tmp/stdio-runner_1")).to be(false)
     expect(File.exist?("/tmp/stdio-runner_2")).to be(false)
     pid = controller.transport_pid

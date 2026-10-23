@@ -129,10 +129,7 @@ module Selective
             @pipe = NamedPipe.new("/tmp/#{runner_id}_2", "/tmp/#{runner_id}_1")
             @transport_pid = spawn_transport_process(reconnect: reconnect)
           else
-            @pipe = StdioTransport.open(
-              ensure_transport_binary!,
-              transport_url(reconnect: reconnect)
-            )
+            @pipe = StdioTransport.open(stdio_transport!, transport_url(reconnect: reconnect))
             @transport_pid = @pipe.pid
           end
 
@@ -264,6 +261,19 @@ module Selective
           %w[1 true yes].include?(ENV["SELECTIVE_TRANSPORT_FIFO"].to_s.downcase)
         end
 
+        def stdio_transport!
+          return @stdio_transport if @stdio_transport
+
+          path = ensure_transport_binary!
+          help, = Open3.capture2e(path, "--help")
+          unless help.include?("--stdio")
+            with_error_handling do
+              raise "#{path} does not support --stdio. Set SELECTIVE_TRANSPORT_FIFO=1 to use the legacy sidecar for this release."
+            end
+          end
+          @stdio_transport = path
+        end
+
         def wait_for_connectivity
           @connectivity = false
           @pending_commands = []
@@ -310,7 +320,7 @@ module Selective
             Signal.trap(signal) do
               report_termination(signal)
               kill_transport(signal: signal)
-              exit(runner.exit_status)
+              exit(stop_status)
             end
           end
         end
@@ -328,8 +338,12 @@ module Selective
 
           write({type: "terminating", data: {signal: signal}})
           sleep(TERMINATION_REPORT_GRACE)
-        rescue ConnectionLostError, IOError, SystemCallError
-          # Nothing to report to.
+        rescue ConnectionLostError, IOError, SystemCallError, ThreadError
+          nil
+        end
+
+        def stop_status
+          @close_status || runner.exit_status
         end
 
         def kill_transport(signal: "TERM")
@@ -345,7 +359,7 @@ module Selective
 
               Kernel.sleep(0.05)
             end
-          rescue ConnectionLostError, IOError
+          rescue ConnectionLostError, IOError, ThreadError
             # If the pipe is close, move straight to killing
             # it forcefully.
           end
@@ -423,6 +437,7 @@ module Selective
 
         def handle_close(data)
           exit_status = data[:exit_status]
+          @close_status = exit_status if exit_status.is_a?(Integer)
           self.class.restore_reporting!
 
           with_error_handling do
@@ -436,7 +451,7 @@ module Selective
 
           kill_transport
           pipe.delete_pipes
-          exit(exit_status || runner.exit_status)
+          exit(stop_status)
           # This :break is here for the sake of test where
           # we cannot exit but we need to break the loop
           :break

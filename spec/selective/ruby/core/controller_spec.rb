@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "fileutils"
-
 RSpec.describe Selective::Ruby::Core::Controller do
   around do |example|
     previous_fifo = ENV["SELECTIVE_TRANSPORT_FIFO"]
@@ -12,23 +10,6 @@ RSpec.describe Selective::Ruby::Core::Controller do
       ENV.delete("SELECTIVE_TRANSPORT_FIFO")
     else
       ENV["SELECTIVE_TRANSPORT_FIFO"] = previous_fifo
-    end
-  end
-
-  before(:all) do
-    path = File.join(Selective::Ruby::Core::ROOT_GEM_PATH, "lib", "bin", "transport")
-    @created_transport_placeholder = false
-    unless File.exist?(path)
-      FileUtils.mkdir_p(File.dirname(path))
-      File.write(path, "")
-      @created_transport_placeholder = true
-    end
-  end
-
-  after(:all) do
-    if @created_transport_placeholder
-      path = File.join(Selective::Ruby::Core::ROOT_GEM_PATH, "lib", "bin", "transport")
-      File.delete(path) if File.exist?(path)
     end
   end
 
@@ -59,6 +40,7 @@ RSpec.describe Selective::Ruby::Core::Controller do
 
   before do
     allow(Process).to receive(:spawn).and_return(123)
+    allow(controller).to receive(:ensure_transport_binary!).and_return("transport")
     allow(controller).to receive(:kill_transport)
     allow(controller).to receive(:handle_termination_signals)
     allow(controller).to receive(:wait_for_connectivity)
@@ -271,6 +253,36 @@ RSpec.describe Selective::Ruby::Core::Controller do
 
         expect(exit_status_on("INT")).to eq(0)
         expect(controller).to have_received(:kill_transport).with(signal: "INT")
+      end
+
+      it "still exits when the terminating write deadlocks" do
+        allow(pipe).to receive(:write).and_raise(ThreadError)
+
+        expect(exit_status_on("TERM")).to eq(0)
+        expect(controller).to have_received(:kill_transport).with(signal: "TERM")
+      end
+
+      it "exits with an integer close status when a signal arrives during close" do
+        allow(controller).to receive(:write)
+        allow(controller).to receive(:upload_test_map)
+        allow(runner).to receive(:finish)
+        allow(pipe).to receive(:delete_pipes)
+
+        expect { controller.handle_close({exit_status: 7}) }.to raise_error(SystemExit) { |error|
+          expect(error.status).to eq(7)
+        }
+        expect(exit_status_on("TERM")).to eq(7)
+      end
+
+      it "kills the transport when the exit line cannot be written" do
+        allow(controller).to receive(:kill_transport).and_call_original
+        allow(Process).to receive(:kill)
+        allow(pipe).to receive(:write).and_raise(ThreadError)
+        controller.instance_variable_set(:@transport_pid, 123)
+
+        controller.kill_transport(signal: "TERM")
+
+        expect(Process).to have_received(:kill).with("TERM", 123)
       end
     end
   end

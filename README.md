@@ -47,14 +47,19 @@ The URL, including the API key, is that environment variable. It is not a
 process argument. The runner writes client messages to the transport's stdin
 and reads server commands from its stdout, one JSON object per line. A line
 whose contents are `exit` shuts the transport down and is not a test result.
-The transport's own logs stay on stderr.
+The transport's own logs are inherited on stderr, so a refused connection is
+printed by the transport itself.
 
 `SELECTIVE_TRANSPORT_FIFO=1` keeps the previous sidecar for this release. That
 mode still creates `/tmp/<runner_id>_1` and `/tmp/<runner_id>_2` and still
 passes the URL and runner id as arguments. Stdio does not create those FIFOs.
 
-The binary has to understand `--stdio`. The legacy FIFO invocation remains
-available for one release via the variable above.
+The binary has to understand `--stdio`. If `--help` does not list it, the
+runner exits immediately and names `SELECTIVE_TRANSPORT_FIFO=1`. It does not
+retry. `bin/get_transport` builds the commit in `TRANSPORT_REF` at the top of
+that script, which needs a Rust toolchain. Change `TRANSPORT_REF` to a release
+tag such as `v0.2.0` once a release includes `--stdio`; a tag is downloaded
+instead of built, which is what `bin/release` needs for every platform.
 
 ## Contributing
 

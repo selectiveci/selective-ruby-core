@@ -1,5 +1,5 @@
 ## [0.2.15] - 2026-10-22
-- Talk to the transport over stdio by default. The runner spawns `transport --stdio` and passes the websocket URL, including the API key, in `SELECTIVE_TRANSPORT_URL` instead of on the process arguments. Server commands and client messages stay one JSON object per line, and a line containing `exit` still shuts the transport down. Requires a transport binary that implements `--stdio`.
+- Talk to the transport over stdio by default. The runner spawns `transport --stdio` and passes the websocket URL, including the API key, in `SELECTIVE_TRANSPORT_URL` instead of on the process arguments. Server commands and client messages stay one JSON object per line, and a line containing `exit` still shuts the transport down. The transport's stderr is inherited, so its own errors are visible. A binary whose `--help` does not list `--stdio` fails immediately and tells you to set `SELECTIVE_TRANSPORT_FIFO=1`.
 - Keep the legacy `/tmp/<runner_id>_1` and `_2` FIFOs for this release. Set `SELECTIVE_TRANSPORT_FIFO=1` (also `true` or `yes`) to use them.
 - Honor `SELECTIVE_TRANSPORT` as an explicit path to the transport binary.
 - Queue server commands that arrive before `connected` and apply them, in order, once `connected` arrives. A command that arrives while a batch is running is still applied only after that batch returns.

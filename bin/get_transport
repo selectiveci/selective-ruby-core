@@ -1,37 +1,61 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
-# Get OS and Architecture
+TRANSPORT_REF="${SELECTIVE_TRANSPORT_REF:-c728f92e64009329cfab7d85e6de37e90416e805}"
+
 os=${1:-$(uname -s)}
 arch=${2:-$(uname -m)}
 
-# Darwin has a different architecture string for arm64
-[ "$os" = "Darwin" ] && [ "$arch" = "arm64" ] && arch="aarch64"
+if [ "$os" = "Darwin" ] && [ "$arch" = "arm64" ]; then
+  arch="aarch64"
+fi
 
-# Define base URL
-base_url="https://github.com/selectiveci/transport/releases/latest/download/transport"
-
-# Construct download URL
-url="${base_url}-${os}-${arch}.tar.gz"
-
-# Check for unsupported combinations
 if [ "$os" != "Darwin" ] && [ "$os" != "Linux" ]; then
-    echo "Unsupported OS"
-    exit 1
+  echo "Unsupported OS" >&2
+  exit 1
 fi
 
 if { [ "$os" = "Darwin" ] && [ "$arch" != "aarch64" ] && [ "$arch" != "x86_64" ]; } ||
    { [ "$os" = "Linux" ] && [ "$arch" != "aarch64" ] && [ "$arch" != "x86_64" ]; }; then
-    echo "Unsupported Architecture"
-    exit 1
+  echo "Unsupported Architecture" >&2
+  exit 1
 fi
 
-# Download the binary
-curl -L --fail --silent --show-error $url -o ./temp.tar.gz
+root="$(cd "$(dirname "$0")/.." && pwd)"
+dest="$root/lib/bin"
+mkdir -p "$dest"
 
-# Extract the binary to the lib/bin directory
-tar -xzf ./temp.tar.gz -C $(dirname "$0")/../lib/bin
+if [[ "$TRANSPORT_REF" == v* ]]; then
+  archive="$root/tmp/transport.tar.gz"
+  mkdir -p "$root/tmp"
+  curl -L --fail --silent --show-error \
+    "https://github.com/selectiveci/transport/releases/download/${TRANSPORT_REF}/transport-${os}-${arch}.tar.gz" \
+    -o "$archive"
+  tar -xzf "$archive" -C "$dest"
+  rm "$archive"
+  exit 0
+fi
 
-# Remove the downloaded tar file
-rm ./temp.tar.gz
+host_os="$(uname -s)"
+host_arch="$(uname -m)"
+if [ "$host_os" = "Darwin" ] && [ "$host_arch" = "arm64" ]; then
+  host_arch="aarch64"
+fi
+
+if [ "$os" != "$host_os" ] || [ "$arch" != "$host_arch" ]; then
+  echo "TRANSPORT_REF ${TRANSPORT_REF} is a commit, so only the host binary can be built. Set it to a release tag to fetch ${os} ${arch}." >&2
+  exit 1
+fi
+
+src="$root/tmp/transport-src"
+mkdir -p "$root/tmp"
+if [ ! -d "$src/.git" ]; then
+  git init -q "$src"
+  git -C "$src" remote add origin https://github.com/selectiveci/transport
+fi
+git -C "$src" fetch --depth 1 -q origin "$TRANSPORT_REF"
+git -C "$src" checkout -q --force FETCH_HEAD
+cargo build --release --manifest-path "$src/Cargo.toml"
+cp "$src/target/release/transport" "$dest/transport"
+chmod +x "$dest/transport"

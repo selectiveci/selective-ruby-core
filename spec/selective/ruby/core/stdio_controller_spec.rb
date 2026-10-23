@@ -69,6 +69,8 @@ RSpec.describe "stdio controller" do
 
   before do
     File.chmod(0o755, fake_transport)
+    allow(controller).to receive(:handle_termination_signals)
+    allow(Selective::Ruby::Core::Controller).to receive(:restore_reporting!)
     allow(runner).to receive(:run_test_cases) do |ids|
       batch_state[:in_batch] = true
       events << [:run, ids.dup]
@@ -205,5 +207,18 @@ RSpec.describe "stdio controller" do
     Timeout.timeout(5) { controller.start }
 
     expect(runner).to have_received(:finish).once
+  end
+
+  it "fails once when the binary does not support stdio" do
+    path = File.join(directory, "old-transport")
+    File.write(path, "#!/bin/sh\nprintf '%s\\n' 'Usage: transport <url> <runner_id>'\nexit 1\n")
+    File.chmod(0o755, path)
+    ENV["SELECTIVE_TRANSPORT"] = path
+    allow(controller).to receive(:exit).with(1).and_raise(SystemExit.new(1))
+
+    expect { controller.start }.to raise_error(SystemExit)
+    expect(controller).to have_received(:puts_indented).with(/old-transport does not support --stdio/)
+    expect(controller).to have_received(:puts_indented).with(/SELECTIVE_TRANSPORT_FIFO=1/)
+    expect(controller.retries).to eq(0)
   end
 end

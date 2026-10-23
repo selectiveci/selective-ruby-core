@@ -7,6 +7,11 @@ require "fileutils"
 $stdout.sync = true
 $stderr.sync = true
 
+if ARGV.include?("--help")
+  puts "transport --stdio"
+  exit 0
+end
+
 mode = ENV.fetch("SELECTIVE_FAKE_MODE", "close")
 directory = ENV.fetch("SELECTIVE_FAKE_DIR")
 FileUtils.mkdir_p(directory)
@@ -28,7 +33,13 @@ state = {
   "pid" => Process.pid,
   "count" => count,
   "argv" => ARGV,
-  "cmdline" => File.read("/proc/self/cmdline").split("\0"),
+  "cmdline" => (
+    if File.exist?("/proc/self/cmdline")
+      File.read("/proc/self/cmdline").split("\0")
+    else
+      [RbConfig.ruby, $PROGRAM_NAME, *ARGV]
+    end
+  ),
   "url" => ENV["SELECTIVE_TRANSPORT_URL"],
   "stdin" => stdin_lines
 }

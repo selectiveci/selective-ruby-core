@@ -7,52 +7,45 @@ module Selective
     module Core
       class StdioTransport
         SHUTDOWN_GRACE = 1
-        CLOSED = Object.new
 
-        attr_reader :pid, :wait_thread, :stderr_lines
+        attr_reader :pid, :wait_thread
 
         def self.open(binary, url)
-          stdin, stdout, stderr, wait_thread = Open3.popen3(
+          stdin, stdout, wait_thread = Open3.popen2(
             {"SELECTIVE_TRANSPORT_URL" => url},
             binary,
-            "--stdio"
+            "--stdio",
+            pgroup: true
           )
-          new(stdin, stdout, stderr, wait_thread)
+          new(stdin, stdout, wait_thread)
         end
 
-        def initialize(stdin, stdout, stderr, wait_thread)
+        def initialize(stdin, stdout, wait_thread)
           @stdin = stdin
           @stdout = stdout
-          @stderr = stderr
           @wait_thread = wait_thread
           @pid = wait_thread.pid
           @queue = Queue.new
-          @close_mutex = Mutex.new
-          @stderr_mutex = Mutex.new
-          @stderr_lines = []
-          @closed_signaled = false
           @shut_down = false
-          @stdin.sync = true
           @reader = Thread.new { read_stdout }
-          @stderr_reader = Thread.new { drain_stderr }
         end
 
         def write(message)
           io = @stdin
           raise ConnectionLostError if io.nil? || io.closed?
 
-          io.write(message)
-          io.write("\n")
-          io.flush
+          io.write("#{message}\n")
         rescue Errno::EPIPE, Errno::ECONNRESET, Errno::EBADF, IOError
           raise ConnectionLostError
         end
 
         def read
           message = @queue.pop
-          raise ConnectionLostError if message.equal?(CLOSED)
+          raise ConnectionLostError if message.nil?
 
           message
+        rescue ClosedQueueError
+          raise ConnectionLostError
         end
 
         def reset!
@@ -82,39 +75,20 @@ module Selective
             @wait_thread.join(SHUTDOWN_GRACE)
           end
           close_io(@stdout)
-          close_io(@stderr)
-          signal_closed
           @reader&.join(SHUTDOWN_GRACE)
-          @stderr_reader&.join(SHUTDOWN_GRACE)
+          @queue.close
         end
 
         private
 
         def read_stdout
-          until @stdout.closed?
-            line = @stdout.gets
-            break if line.nil?
-
+          while (line = @stdout.gets)
             @queue << line.chomp
           end
-        rescue IOError, Errno::EBADF
+        rescue IOError, Errno::EBADF, ClosedQueueError
           nil
         ensure
-          signal_closed
-        end
-
-        def drain_stderr
-          until @stderr.closed?
-            line = @stderr.gets
-            break if line.nil?
-
-            @stderr_mutex.synchronize do
-              @stderr_lines << line
-              @stderr_lines.shift while @stderr_lines.size > 50
-            end
-          end
-        rescue IOError, Errno::EBADF
-          nil
+          @queue.close
         end
 
         def request_exit
@@ -135,17 +109,6 @@ module Selective
           io.close
         rescue IOError, Errno::EBADF
           nil
-        end
-
-        def signal_closed
-          should_signal = false
-          @close_mutex.synchronize do
-            unless @closed_signaled
-              @closed_signaled = true
-              should_signal = true
-            end
-          end
-          @queue << CLOSED if should_signal
         end
       end
     end
