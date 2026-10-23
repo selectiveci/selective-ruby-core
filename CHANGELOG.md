@@ -1,5 +1,5 @@
 ## [0.2.15] - 2026-10-23
-- Bundle transport 0.1.3:
+- Bundle transport 0.1.2:
   - Large test manifests no longer stall on the way to the server. Delivery used to slow down quadratically with message size; an 8 MB manifest now arrives in milliseconds.
   - Linux binaries are static, so they run on any distribution regardless of its glibc, including Alpine and distributions older than glibc 2.28.
   - Messages written just before the runner stops reach the server first, and the connection closes cleanly. Pings from the server no longer reach the runner as unreadable lines.
