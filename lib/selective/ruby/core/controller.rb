@@ -224,19 +224,13 @@ module Selective
           end
         end
 
-        def transport_binary
-          explicit = ENV["SELECTIVE_TRANSPORT"].to_s
-          return explicit unless explicit.empty?
-
-          File.join(ROOT_GEM_PATH, "lib", "bin", "transport")
-        end
-
         def ensure_transport_binary!
-          path = transport_binary
+          explicit = ENV["SELECTIVE_TRANSPORT"].to_s
+          path = explicit.empty? ? File.join(ROOT_GEM_PATH, "lib", "bin", "transport") : explicit
           return path if File.exist?(path)
 
           get_transport_path = File.join(ROOT_GEM_PATH, "bin", "get_transport")
-          if ENV["SELECTIVE_TRANSPORT"].to_s.empty? && File.exist?(get_transport_path)
+          if explicit.empty? && File.exist?(get_transport_path)
             # The get_transport script is not released with the gem, so this
             # code is intended for development/CI purposes.
             output, status = Open3.capture2e(get_transport_path)
@@ -261,16 +255,15 @@ module Selective
         end
 
         def stdio_transport!
-          return @stdio_transport if @stdio_transport
-
-          path = ensure_transport_binary!
-          help, = Open3.capture2e(path, "--help")
-          unless help.include?("--stdio")
-            with_error_handling do
-              raise "#{path} does not support --stdio. Set SELECTIVE_TRANSPORT_FIFO=1 to use the legacy sidecar for this release."
+          @stdio_transport ||= begin
+            path = ensure_transport_binary!
+            unless Open3.capture2e(path, "--help").first.include?("--stdio")
+              with_error_handling do
+                raise "#{path} does not support --stdio. Set SELECTIVE_TRANSPORT_FIFO=1 to use the legacy sidecar for this release."
+              end
             end
+            path
           end
-          @stdio_transport = path
         end
 
         def wait_for_connectivity
