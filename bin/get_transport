@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-TRANSPORT_REF=c728f92e64009329cfab7d85e6de37e90416e805
+TRANSPORT_REF=40221370ceb8f0d636900a2a8aa318ce2ce0ff67
 
 os=${1:-$(uname -s)}
 arch=${2:-$(uname -m)}
