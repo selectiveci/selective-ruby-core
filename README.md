@@ -54,9 +54,9 @@ printed by the transport itself.
 mode still creates `/tmp/<runner_id>_1` and `/tmp/<runner_id>_2` and still
 passes the URL and runner id as arguments. Stdio does not create those FIFOs.
 
-The binary has to understand `--stdio`. If `--help` does not list it, the
-runner exits immediately and names `SELECTIVE_TRANSPORT_FIFO=1`. It does not
-retry. `bin/get_transport` builds the commit in `TRANSPORT_REF` at the top of
+A binary without `--stdio`, such as v0.1.1 or v0.1.2, runs as the FIFO sidecar
+instead, and the runner prints one warning. A binary that cannot run at all
+exits 1 with its own error. `bin/get_transport` builds the commit in `TRANSPORT_REF` at the top of
 that script, which needs a Rust toolchain. Change `TRANSPORT_REF` to a release
 tag such as `v0.2.0` once a release includes `--stdio`; a tag is downloaded
 instead of built, which is what `bin/release` needs for every platform.

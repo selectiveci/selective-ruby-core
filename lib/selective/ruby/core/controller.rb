@@ -123,12 +123,12 @@ module Selective
         # One connection: true when the run finished on it, false when it was
         # lost and the caller should reconnect.
         def connect_and_run(reconnect:)
-          if fifo_fallback?
+          if stdio?
+            @pipe = StdioTransport.open(transport_binary, transport_url(reconnect: reconnect))
+            @transport_pid = @pipe.pid
+          else
             @pipe = NamedPipe.new("/tmp/#{runner_id}_2", "/tmp/#{runner_id}_1")
             @transport_pid = spawn_transport_process(reconnect: reconnect)
-          else
-            @pipe = StdioTransport.open(stdio_transport!, transport_url(reconnect: reconnect))
-            @transport_pid = @pipe.pid
           end
 
           handle_termination_signals(transport_pid)
@@ -216,7 +216,7 @@ module Selective
         end
 
         def spawn_transport_process(reconnect: false)
-          Process.spawn(ensure_transport_binary!, transport_url(reconnect: reconnect), runner_id).tap do |pid|
+          Process.spawn(transport_binary, transport_url(reconnect: reconnect), runner_id).tap do |pid|
             Process.detach(pid)
           end
         end
@@ -247,29 +247,41 @@ module Selective
           path
         end
 
-        def fifo_fallback?
+        def transport_binary
+          @transport_binary ||= ensure_transport_binary!
+        end
+
+        def stdio?
+          @stdio = !fifo_requested? && transport_supports_stdio? if @stdio.nil?
+          @stdio
+        end
+
+        def fifo_requested?
           %w[1 true yes].include?(ENV["SELECTIVE_TRANSPORT_FIFO"].to_s.downcase)
         end
 
-        def stdio_transport!
-          @stdio_transport ||= begin
-            path = ensure_transport_binary!
-            unless Open3.capture2e(path, "--help").first.include?("--stdio")
-              with_error_handling do
-                raise "#{path} does not support --stdio. Set SELECTIVE_TRANSPORT_FIFO=1 to use the legacy sidecar for this release."
-              end
-            end
-            path
-          end
+        def transport_supports_stdio?
+          help, _status = Open3.capture2e(transport_binary, "--help")
+          return true if help.include?("--stdio")
+
+          predates_stdio = help.include?("<url> <runner_id>")
+          with_error_handling { raise "#{transport_binary} could not be run:\n#{help}" } unless predates_stdio
+
+          print_warning("#{transport_binary} does not support --stdio, so this run uses the FIFO sidecar. Update the transport to use stdio.")
+          false
         end
 
         def wait_for_connectivity
+          @connectivity = false
           @pending_commands = []
-          watchdog = Thread.new do
+
+          Thread.new do
             Kernel.sleep(CONNECT_TIMEOUT)
-            puts "Transport process failed to start. Exiting..."
-            kill_transport
-            exit(1)
+            unless @connectivity
+              puts "Transport process failed to start. Exiting..."
+              kill_transport
+              exit(1)
+            end
           end
 
           loop do
@@ -280,12 +292,13 @@ module Selective
             next sleep(0.1) if message.nil?
 
             response = JSON.parse(message, symbolize_names: true)
-            break if response[:command] == "connected"
+            if response[:command] == "connected"
+              @connectivity = true
+              break
+            end
 
             @pending_commands << response
           end
-        ensure
-          watchdog&.kill
         end
 
         def handle_termination_signals(pid)
@@ -293,7 +306,7 @@ module Selective
             Signal.trap(signal) do
               report_termination(signal)
               kill_transport(signal: signal)
-              exit(stop_status)
+              exit(runner.exit_status)
             end
           end
         end
@@ -313,10 +326,6 @@ module Selective
           sleep(TERMINATION_REPORT_GRACE)
         rescue ConnectionLostError, IOError, SystemCallError, ThreadError
           nil
-        end
-
-        def stop_status
-          @close_status || runner.exit_status
         end
 
         def kill_transport(signal: "TERM")
@@ -405,7 +414,6 @@ module Selective
 
         def handle_close(data)
           exit_status = data[:exit_status]
-          @close_status = exit_status if exit_status.is_a?(Integer)
           self.class.restore_reporting!
 
           with_error_handling do
@@ -419,7 +427,7 @@ module Selective
 
           kill_transport
           pipe.delete_pipes
-          exit(stop_status)
+          exit(exit_status || runner.exit_status)
           # This :break is here for the sake of test where
           # we cannot exit but we need to break the loop
           :break

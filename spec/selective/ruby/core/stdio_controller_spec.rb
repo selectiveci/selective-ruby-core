@@ -7,6 +7,7 @@ require "tmpdir"
 
 RSpec.describe "stdio controller" do
   let(:fake_transport) { File.expand_path("../../../support/fake_stdio_transport.rb", __dir__) }
+  let(:fake_fifo_transport) { File.expand_path("../../../support/fake_fifo_transport.rb", __dir__) }
   let(:directory) { Dir.mktmpdir("selective-stdio-controller") }
   let(:build_env) do
     {
@@ -50,6 +51,7 @@ RSpec.describe "stdio controller" do
   end
 
   around do |example|
+    threads = Thread.list
     with_env(
       "SELECTIVE_TRANSPORT" => fake_transport,
       "SELECTIVE_TRANSPORT_FIFO" => nil,
@@ -57,6 +59,7 @@ RSpec.describe "stdio controller" do
       "SELECTIVE_FAKE_DIR" => directory
     ) { example.run }
   ensure
+    (Thread.list - threads).each(&:kill)
     FileUtils.rm_rf(directory) if directory
   end
 
@@ -150,17 +153,15 @@ RSpec.describe "stdio controller" do
     expect(reports.first["manifest_missing"]).to be_nil
   end
 
-  it "disarms the connect watchdog before the retry backoff" do
+  it "exits 1 from the first attempt's watchdog when no attempt has connected in time" do
     stub_const("Selective::Ruby::Core::Controller::CONNECT_TIMEOUT", 0.4)
     allow(controller).to receive(:sleep).and_call_original
+    allow(controller).to receive(:puts)
     ENV["SELECTIVE_FAKE_MODE"] = "retry_after_drop"
-    statuses = []
-    allow(controller).to receive(:exit) { |code| statuses << code }
+    allow(controller).to receive(:exit).with(1).and_raise(SystemExit.new(1))
 
-    Timeout.timeout(3) { controller.start }
-    sleep 0.6
-
-    expect(statuses).to eq([0])
+    expect { Timeout.timeout(3) { controller.start } }.to raise_error(SystemExit)
+    expect(controller).to have_received(:puts).with("Transport process failed to start. Exiting...")
     expect(controller.retries).to eq(1)
   end
 
@@ -212,16 +213,33 @@ RSpec.describe "stdio controller" do
     expect(runner).to have_received(:finish).once
   end
 
-  it "fails once when the binary does not support stdio" do
-    path = File.join(directory, "old-transport")
-    File.write(path, "#!/bin/sh\nprintf '%s\\n' 'Usage: transport <url> <runner_id>'\nexit 1\n")
+  it "falls back to the FIFO sidecar with one warning when the binary predates stdio" do
+    File.chmod(0o755, fake_fifo_transport)
+    ENV["SELECTIVE_TRANSPORT"] = fake_fifo_transport
+    statuses = []
+    allow(controller).to receive(:exit) { |code| statuses << code }
+
+    Timeout.timeout(10) { controller.start }
+
+    spawns = Dir[File.join(directory, "fifo-*.json")].sort.map { |path| JSON.parse(File.read(path))["argv"] }
+    expect(spawns.size).to eq(2)
+    expect(spawns.map(&:last).uniq).to eq(["stdio-runner"])
+    expect(spawns.first.first).to include("api_key=test-api-key")
+    expect(controller.retries).to eq(1)
+    expect(statuses).to eq([0])
+    expect(controller).to have_received(:puts_indented).with(/fake_fifo_transport.rb does not support --stdio/).once
+  end
+
+  it "shows the binary's own error, without FIFO advice, when it cannot run" do
+    path = File.join(directory, "unloadable-transport")
+    File.write(path, "#!/bin/sh\necho \"$0: version \\`GLIBC_2.34' not found\" >&2\nexit 1\n")
     File.chmod(0o755, path)
     ENV["SELECTIVE_TRANSPORT"] = path
     allow(controller).to receive(:exit).with(1).and_raise(SystemExit.new(1))
 
     expect { controller.start }.to raise_error(SystemExit)
-    expect(controller).to have_received(:puts_indented).with(/old-transport does not support --stdio/)
-    expect(controller).to have_received(:puts_indented).with(/SELECTIVE_TRANSPORT_FIFO=1/)
-    expect(controller.retries).to eq(0)
+    expect(controller).to have_received(:puts_indented).with(/unloadable-transport could not be run:\n.*GLIBC_2\.34' not found/m)
+    expect(controller).not_to have_received(:puts_indented).with(/FIFO/)
+    expect(reports).to be_empty
   end
 end

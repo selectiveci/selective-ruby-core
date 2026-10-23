@@ -252,7 +252,7 @@ RSpec.describe Selective::Ruby::Core::Controller do
         expect(controller).to have_received(:kill_transport).with(signal: "TERM")
       end
 
-      it "exits with an integer close status when a signal arrives during close" do
+      it "exits with the runner's status when a signal arrives after an integer close" do
         allow(controller).to receive(:write)
         allow(controller).to receive(:upload_test_map)
         allow(runner).to receive(:finish)
@@ -261,7 +261,7 @@ RSpec.describe Selective::Ruby::Core::Controller do
         expect { controller.handle_close({exit_status: 7}) }.to raise_error(SystemExit) { |error|
           expect(error.status).to eq(7)
         }
-        expect(exit_status_on("TERM")).to eq(7)
+        expect(exit_status_on("TERM")).to eq(0)
       end
 
       it "kills the transport when the exit line cannot be written" do
