@@ -232,7 +232,7 @@ RSpec.describe "stdio controller" do
 
   it "shows the binary's own error, without FIFO advice, when it cannot run" do
     path = File.join(directory, "unloadable-transport")
-    File.write(path, "#!/bin/sh\necho \"$0: version \\`GLIBC_2.34' not found\" >&2\nexit 1\n")
+    File.write(path, "#!/bin/sh\nprintf '\\377\\n' >&2\necho \"$0: version \\`GLIBC_2.34' not found\" >&2\nexit 1\n")
     File.chmod(0o755, path)
     ENV["SELECTIVE_TRANSPORT"] = path
     allow(controller).to receive(:exit).with(1).and_raise(SystemExit.new(1))

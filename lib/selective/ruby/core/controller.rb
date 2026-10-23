@@ -261,7 +261,7 @@ module Selective
         end
 
         def transport_supports_stdio?
-          help, _status = Open3.capture2e(transport_binary, "--help")
+          help = Open3.capture2e(transport_binary, "--help").first.scrub
           return true if help.include?("--stdio")
 
           predates_stdio = help.include?("<url> <runner_id>")
