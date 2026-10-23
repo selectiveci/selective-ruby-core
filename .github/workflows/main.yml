@@ -26,6 +26,11 @@ jobs:
           ruby-version: "4.0"
           bundler-cache: true
 
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build the pinned transport
+        run: bash bin/get_transport
+
       - name: Setup Selective
         uses: selectiveci/setup-selective@v1
         with:

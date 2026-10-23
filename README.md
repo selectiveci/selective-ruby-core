@@ -33,6 +33,34 @@ bundle exec rake compile
 | `SELECTIVE_TEST_MAP_DISABLE=1` | Take no part in selection: always run the full suite, never record. |
 | `SELECTIVE_TEST_MAP_IGNORE=dir1,dir2` | Extra directories inside the project whose code isn't the project's own (vendored code, generated clients). Installed gems are ignored automatically. |
 
+## Transport
+
+The runner spawns the `transport` binary from `lib/bin/transport`, or from
+`SELECTIVE_TRANSPORT` when that variable is an explicit path. The default is
+stdio:
+
+```text
+SELECTIVE_TRANSPORT_URL=wss://... transport --stdio
+```
+
+The URL, including the API key, is that environment variable. It is not a
+process argument. The runner writes client messages to the transport's stdin
+and reads server commands from its stdout, one JSON object per line. A line
+whose contents are `exit` shuts the transport down and is not a test result.
+The transport's own logs are inherited on stderr, so a refused connection is
+printed by the transport itself.
+
+`SELECTIVE_TRANSPORT_FIFO=1` keeps the previous sidecar for this release. That
+mode still creates `/tmp/<runner_id>_1` and `/tmp/<runner_id>_2` and still
+passes the URL and runner id as arguments. Stdio does not create those FIFOs.
+
+A binary without `--stdio`, such as v0.1.1 or v0.1.2, runs as the FIFO sidecar
+instead, and the runner prints one warning. A binary that cannot run at all
+exits 1 with its own error. `bin/get_transport` builds the commit in `TRANSPORT_REF` at the top of
+that script, which needs a Rust toolchain. Change `TRANSPORT_REF` to a release
+tag such as `v0.2.0` once a release includes `--stdio`; a tag is downloaded
+instead of built, which is what `bin/release` needs for every platform.
+
 ## Contributing
 
 Bug reports and pull requests are welcome on GitHub at https://github.com/selectiveci/selective-ruby-core. This project is intended to be a safe, welcoming space for collaboration, and contributors are expected to adhere to the [code of conduct](https://github.com/selectiveci/selective-ruby-core/blob/main/CODE_OF_CONDUCT.md).

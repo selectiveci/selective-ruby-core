@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
 RSpec.describe Selective::Ruby::Core::Controller do
+  around { |example| with_env("SELECTIVE_TRANSPORT_FIFO" => "1") { example.run } }
+
   let(:runner_class) { class_double("runner_class", new: runner) }
-  let(:runner) { double("runner", finish: nil, exit_status: 1, framework: 'rspec', framework_version: "1.0", wrapper_version: "1.0") }
+  let(:runner) { double("runner", finish: nil, exit_status: 1, framework: "rspec", framework_version: "1.0", wrapper_version: "1.0") }
   let(:build_env) do
     {
       "host" => "wss://app.selective.ci",
@@ -28,6 +30,7 @@ RSpec.describe Selective::Ruby::Core::Controller do
 
   before do
     allow(Process).to receive(:spawn).and_return(123)
+    allow(controller).to receive(:ensure_transport_binary!).and_return("transport")
     allow(controller).to receive(:kill_transport)
     allow(controller).to receive(:handle_termination_signals)
     allow(controller).to receive(:wait_for_connectivity)
@@ -165,7 +168,7 @@ RSpec.describe Selective::Ruby::Core::Controller do
       allow(controller).to receive(:puts_indented)
     end
 
-    it 'raises an error when required configuration is missing' do
+    it "raises an error when required configuration is missing" do
       controller.validate_build_env({})
       expect(controller).to have_received(:puts_indented).with(/Missing required environment variables: SELECTIVE_HOST/)
     end
@@ -240,6 +243,46 @@ RSpec.describe Selective::Ruby::Core::Controller do
 
         expect(exit_status_on("INT")).to eq(0)
         expect(controller).to have_received(:kill_transport).with(signal: "INT")
+      end
+
+      it "still exits when the terminating write deadlocks" do
+        allow(pipe).to receive(:write).and_raise(ThreadError)
+
+        expect(exit_status_on("TERM")).to eq(0)
+        expect(controller).to have_received(:kill_transport).with(signal: "TERM")
+      end
+
+      it "exits with the runner's status when a signal arrives after an integer close" do
+        allow(controller).to receive(:write)
+        allow(controller).to receive(:upload_test_map)
+        allow(runner).to receive(:finish)
+        allow(pipe).to receive(:delete_pipes)
+
+        expect { controller.handle_close({exit_status: 7}) }.to raise_error(SystemExit) { |error|
+          expect(error.status).to eq(7)
+        }
+        expect(exit_status_on("TERM")).to eq(0)
+      end
+
+      it "finishes the runner and lets exit reject a close status that is not an integer" do
+        allow(controller).to receive(:write)
+        allow(controller).to receive(:upload_test_map)
+        allow(runner).to receive(:finish)
+        allow(pipe).to receive(:delete_pipes)
+
+        expect { controller.handle_close({exit_status: "1"}) }.to raise_error(TypeError)
+        expect(runner).to have_received(:finish)
+      end
+
+      it "kills the transport when the exit line cannot be written" do
+        allow(controller).to receive(:kill_transport).and_call_original
+        allow(Process).to receive(:kill)
+        allow(pipe).to receive(:write).and_raise(ThreadError)
+        controller.instance_variable_set(:@transport_pid, 123)
+
+        controller.kill_transport(signal: "TERM")
+
+        expect(Process).to have_received(:kill).with("TERM", 123)
       end
     end
   end
