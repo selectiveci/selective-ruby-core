@@ -3,17 +3,20 @@ set -euo pipefail
 
 dir="$1"
 runners_per_cell="$2"
-status=0
-
-shopt -s nullglob
-files=("$dir"/*.txt)
-if (( ${#files[@]} == 0 )); then
-  echo "no runner counts found in $dir" >&2
+shift 2
+if (( $# == 0 )); then
+  echo "usage: check_cell_totals <dir> <runners-per-cell> <cell>..." >&2
   exit 1
 fi
+status=0
 
-declare -A ran suite runners
-for file in "${files[@]}"; do
+declare -A expected ran suite runners
+for cell in "$@"; do
+  expected[$cell]=1 ran[$cell]=0 suite[$cell]=0 runners[$cell]=0
+done
+
+shopt -s nullglob
+for file in "$dir"/*.txt; do
   name=$(basename "$file" .txt)
   cell=${name%-*}
   read -r count size <"$file"
@@ -26,7 +29,10 @@ done
 
 for cell in $(printf '%s\n' "${!ran[@]}" | sort -V); do
   line="Ruby $cell: ${ran[$cell]} of ${suite[$cell]} examples across ${runners[$cell]} runners"
-  if (( runners[$cell] != runners_per_cell || suite[$cell] == 0 || ran[$cell] < suite[$cell] )); then
+  if [[ -z ${expected[$cell]:-} ]]; then
+    echo "FAIL $line, but the matrix has no such Ruby"
+    status=1
+  elif (( runners[$cell] != runners_per_cell || suite[$cell] == 0 || ran[$cell] < suite[$cell] )); then
     echo "FAIL $line"
     status=1
   else
