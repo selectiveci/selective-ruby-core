@@ -46,3 +46,18 @@ jobs:
         with:
           name: logs-${{ matrix.ci_node_index }}
           path: ./log/*.log
+
+  simplicity:
+    runs-on: ubuntu-24.04
+    name: Simplicity
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      - name: Reject sleep-polling timers and direct ENV writes in specs
+        run: bash bin/simplicity-check

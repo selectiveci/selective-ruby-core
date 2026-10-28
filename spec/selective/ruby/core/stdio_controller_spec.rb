@@ -108,138 +108,148 @@ RSpec.describe "stdio controller" do
   end
 
   it "runs batches over stdio without creating fifos or putting the key on argv" do
-    ENV["SELECTIVE_FAKE_MODE"] = "topup"
-    statuses = []
-    allow(controller).to receive(:exit) { |code| statuses << code }
+    with_env("SELECTIVE_FAKE_MODE" => "topup") do
+      statuses = []
+      allow(controller).to receive(:exit) { |code| statuses << code }
 
-    Timeout.timeout(5) { controller.start }
+      Timeout.timeout(5) { controller.start }
 
-    expect(batches).to eq([["a", "b"], ["c"]])
-    expect(result_ids).to eq(%w[a b c])
-    expect(statuses).to eq([0])
-    expect(reports.map { |report| report["argv"] }.uniq).to eq([["--stdio"]])
-    expect(reports.map { |report| report["url"] }.join).to include("api_key=test-api-key")
-    reports.each do |report|
-      expect(report["stdin"]).to include("exit")
-    end
-    reports.each do |report|
-      expect { Process.getpgid(report["pid"]) }.to raise_error(Errno::ESRCH)
+      expect(batches).to eq([["a", "b"], ["c"]])
+      expect(result_ids).to eq(%w[a b c])
+      expect(statuses).to eq([0])
+      expect(reports.map { |report| report["argv"] }.uniq).to eq([["--stdio"]])
+      expect(reports.map { |report| report["url"] }.join).to include("api_key=test-api-key")
+      reports.each do |report|
+        expect(report["stdin"]).to include("exit")
+      end
+      reports.each do |report|
+        expect { Process.getpgid(report["pid"]) }.to raise_error(Errno::ESRCH)
+      end
     end
   end
 
   it "applies a remove that arrives during a batch only after the batch returns" do
-    ENV["SELECTIVE_FAKE_MODE"] = "remove_during"
-    allow(controller).to receive(:exit)
+    with_env("SELECTIVE_FAKE_MODE" => "remove_during") do
+      allow(controller).to receive(:exit)
 
-    Timeout.timeout(5) { controller.start }
+      Timeout.timeout(5) { controller.start }
 
-    expect(events).to eq([
-      [:run, ["bad"]],
-      [:remove, "bad"],
-      [:run, ["bad"]]
-    ])
+      expect(events).to eq([
+        [:run, ["bad"]],
+        [:remove, "bad"],
+        [:run, ["bad"]]
+      ])
+    end
   end
 
   it "holds a command that arrives before connected and then answers the manifest" do
-    ENV["SELECTIVE_FAKE_MODE"] = "before_connected"
-    allow(runner).to receive(:run_test_cases)
-    allow(controller).to receive(:exit)
+    with_env("SELECTIVE_FAKE_MODE" => "before_connected") do
+      allow(runner).to receive(:run_test_cases)
+      allow(controller).to receive(:exit)
 
-    Timeout.timeout(5) { controller.start }
+      Timeout.timeout(5) { controller.start }
 
-    manifest = client_messages.find { |message| message["type"] == "test_manifest" }
-    expect(manifest.dig("data", "test_cases", 0, "id")).to eq("a")
-    expect(reports.first["early_write"]).to be_nil
-    expect(reports.first["manifest_missing"]).to be_nil
+      manifest = client_messages.find { |message| message["type"] == "test_manifest" }
+      expect(manifest.dig("data", "test_cases", 0, "id")).to eq("a")
+      expect(reports.first["early_write"]).to be_nil
+      expect(reports.first["manifest_missing"]).to be_nil
+    end
   end
 
   it "exits 1 from the first attempt's watchdog when no attempt has connected in time" do
     stub_const("Selective::Ruby::Core::Controller::CONNECT_TIMEOUT", 0.4)
     allow(controller).to receive(:sleep).and_call_original
     allow(controller).to receive(:puts)
-    ENV["SELECTIVE_FAKE_MODE"] = "retry_after_drop"
-    allow(controller).to receive(:exit).with(1).and_raise(SystemExit.new(1))
+    with_env("SELECTIVE_FAKE_MODE" => "retry_after_drop") do
+      allow(controller).to receive(:exit).with(1).and_raise(SystemExit.new(1))
 
-    expect { Timeout.timeout(3) { controller.start } }.to raise_error(SystemExit)
-    expect(controller).to have_received(:puts).with("Transport process failed to start. Exiting...")
-    expect(controller.retries).to eq(1)
+      expect { Timeout.timeout(3) { controller.start } }.to raise_error(SystemExit)
+      expect(controller).to have_received(:puts).with("Transport process failed to start. Exiting...")
+      expect(controller.retries).to eq(1)
+    end
   end
 
   it "reconnects after the child dies and reports the retry" do
-    ENV["SELECTIVE_FAKE_MODE"] = "die_after_connected"
-    statuses = []
-    allow(controller).to receive(:exit) { |code| statuses << code }
+    with_env("SELECTIVE_FAKE_MODE" => "die_after_connected") do
+      statuses = []
+      allow(controller).to receive(:exit) { |code| statuses << code }
 
-    Timeout.timeout(5) { controller.start }
+      Timeout.timeout(5) { controller.start }
 
-    expect(controller.retries).to eq(1)
-    expect(statuses).to eq([0])
-    expect(reports.size).to eq(2)
-    expect(reports.map { |report| report["count"] }).to contain_exactly(1, 2)
+      expect(controller.retries).to eq(1)
+      expect(statuses).to eq([0])
+      expect(reports.size).to eq(2)
+      expect(reports.map { |report| report["count"] }).to contain_exactly(1, 2)
+    end
   end
 
   it "opens the next session with reconnect=true when the server asks" do
-    ENV["SELECTIVE_FAKE_MODE"] = "reconnect"
-    allow(controller).to receive(:exit) { |code| raise SystemExit.new(code) }
+    with_env("SELECTIVE_FAKE_MODE" => "reconnect") do
+      allow(controller).to receive(:exit) { |code| raise SystemExit.new(code) }
 
-    expect { Timeout.timeout(5) { controller.start } }.to raise_error(SystemExit) { |error|
-      expect(error.status).to eq(0)
-    }
+      expect { Timeout.timeout(5) { controller.start } }.to raise_error(SystemExit) { |error|
+        expect(error.status).to eq(0)
+      }
 
-    urls = reports.map { |report| report["url"] }
-    expect(urls.grep(/reconnect=true/).size).to eq(1)
-    expect(urls.grep_v(/reconnect/).size).to eq(1)
-    expect(runner).to have_received(:finish).once
+      urls = reports.map { |report| report["url"] }
+      expect(urls.grep(/reconnect=true/).size).to eq(1)
+      expect(urls.grep_v(/reconnect/).size).to eq(1)
+      expect(runner).to have_received(:finish).once
+    end
   end
 
   it "exits 1 after the eleventh refused connect and reaps every child" do
-    ENV["SELECTIVE_FAKE_MODE"] = "refuse"
-    allow(controller).to receive(:exit).with(1).and_raise(SystemExit.new(1))
+    with_env("SELECTIVE_FAKE_MODE" => "refuse") do
+      allow(controller).to receive(:exit).with(1).and_raise(SystemExit.new(1))
 
-    expect { Timeout.timeout(30) { controller.start } }.to raise_error(SystemExit)
-    expect(controller.retries).to eq(11)
-    expect(reports.size).to eq(11)
-    reports.each do |report|
-      expect { Timeout.timeout(5) { loop { Process.getpgid(report["pid"]) && sleep(0.05) } } }.to raise_error(Errno::ESRCH)
+      expect { Timeout.timeout(30) { controller.start } }.to raise_error(SystemExit)
+      expect(controller.retries).to eq(11)
+      expect(reports.size).to eq(11)
+      reports.each do |report|
+        expect { Timeout.timeout(5) { loop { Process.getpgid(report["pid"]) && sleep(0.05) } } }.to raise_error(Errno::ESRCH)
+      end
     end
   end
 
   it "parses stdout when the transport writes logs to stderr" do
-    ENV["SELECTIVE_FAKE_MODE"] = "stderr"
-    allow(controller).to receive(:exit)
+    with_env("SELECTIVE_FAKE_MODE" => "stderr") do
+      allow(controller).to receive(:exit)
 
-    Timeout.timeout(5) { controller.start }
+      Timeout.timeout(5) { controller.start }
 
-    expect(runner).to have_received(:finish).once
+      expect(runner).to have_received(:finish).once
+    end
   end
 
   it "falls back to the FIFO sidecar with one warning when the binary predates stdio" do
     File.chmod(0o755, fake_fifo_transport)
-    ENV["SELECTIVE_TRANSPORT"] = fake_fifo_transport
-    statuses = []
-    allow(controller).to receive(:exit) { |code| statuses << code }
+    with_env("SELECTIVE_TRANSPORT" => fake_fifo_transport) do
+      statuses = []
+      allow(controller).to receive(:exit) { |code| statuses << code }
 
-    Timeout.timeout(10) { controller.start }
+      Timeout.timeout(10) { controller.start }
 
-    spawns = Dir[File.join(directory, "fifo-*.json")].sort.map { |path| JSON.parse(File.read(path))["argv"] }
-    expect(spawns.size).to eq(2)
-    expect(spawns.map(&:last).uniq).to eq(["stdio-runner"])
-    expect(spawns.first.first).to include("api_key=test-api-key")
-    expect(controller.retries).to eq(1)
-    expect(statuses).to eq([0])
-    expect(controller).to have_received(:puts_indented).with(/fake_fifo_transport.rb does not support --stdio/).once
+      spawns = Dir[File.join(directory, "fifo-*.json")].sort.map { |path| JSON.parse(File.read(path))["argv"] }
+      expect(spawns.size).to eq(2)
+      expect(spawns.map(&:last).uniq).to eq(["stdio-runner"])
+      expect(spawns.first.first).to include("api_key=test-api-key")
+      expect(controller.retries).to eq(1)
+      expect(statuses).to eq([0])
+      expect(controller).to have_received(:puts_indented).with(/fake_fifo_transport.rb does not support --stdio/).once
+    end
   end
 
   it "shows the binary's own error, without FIFO advice, when it cannot run" do
     path = File.join(directory, "unloadable-transport")
     File.write(path, "#!/bin/sh\nprintf '\\377\\n' >&2\necho \"$0: version \\`GLIBC_2.34' not found\" >&2\nexit 1\n")
     File.chmod(0o755, path)
-    ENV["SELECTIVE_TRANSPORT"] = path
-    allow(controller).to receive(:exit).with(1).and_raise(SystemExit.new(1))
+    with_env("SELECTIVE_TRANSPORT" => path) do
+      allow(controller).to receive(:exit).with(1).and_raise(SystemExit.new(1))
 
-    expect { controller.start }.to raise_error(SystemExit)
-    expect(controller).to have_received(:puts_indented).with(/unloadable-transport could not be run:\n.*GLIBC_2\.34' not found/m)
-    expect(controller).not_to have_received(:puts_indented).with(/FIFO/)
-    expect(reports).to be_empty
+      expect { controller.start }.to raise_error(SystemExit)
+      expect(controller).to have_received(:puts_indented).with(/unloadable-transport could not be run:\n.*GLIBC_2\.34' not found/m)
+      expect(controller).not_to have_received(:puts_indented).with(/FIFO/)
+      expect(reports).to be_empty
+    end
   end
 end
