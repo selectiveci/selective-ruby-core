@@ -8,6 +8,9 @@ AllCops:
   TargetRubyVersion: 2.7
   Exclude:
     - simplicity/**/*
+    - vendor/**/*
+    - tmp/**/*
+    - .bundle/**/*
 
 Selective/SleepPollTimer:
   Enabled: true
