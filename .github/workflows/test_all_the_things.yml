@@ -43,6 +43,11 @@ jobs:
           ruby-version: "${{ matrix.ruby }}"
           bundler-cache: true
 
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build the pinned transport
+        run: bash bin/get_transport
+
       - name: Run the default task
         shell: bash
         env:

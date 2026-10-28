@@ -1,0 +1,19 @@
+require:
+  - ./rubocop/cop/selective/sleep_poll_timer
+  - ./rubocop/cop/selective/direct_env_assign
+
+AllCops:
+  DisabledByDefault: true
+  SuggestExtensions: false
+  TargetRubyVersion: 2.7
+  Exclude:
+    - simplicity/**/*
+    - vendor/**/*
+    - tmp/**/*
+    - .bundle/**/*
+
+Selective/SleepPollTimer:
+  Enabled: true
+
+Selective/DirectEnvAssign:
+  Enabled: true
