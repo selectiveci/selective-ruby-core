@@ -115,7 +115,7 @@ RSpec.describe "transport --stdio binary" do
     statuses = []
     allow(controller).to receive(:exit) { |code| statuses << code }
 
-    with_env("SELECTIVE_TRANSPORT" => binary, "SELECTIVE_TRANSPORT_FIFO" => nil) do
+    with_env("SELECTIVE_TRANSPORT" => binary) do
       Timeout.timeout(8) { controller.start }
     end
     driver.join(2)

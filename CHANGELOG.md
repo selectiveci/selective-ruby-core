@@ -1,6 +1,6 @@
 ## [Unreleased]
 - Talk to the transport over stdio by default. The runner spawns `transport --stdio` and passes the websocket URL, including the API key, in `SELECTIVE_TRANSPORT_URL` instead of on the process arguments. Server commands and client messages stay one JSON object per line, and a line containing `exit` still shuts the transport down. The transport's stderr is inherited, so its own errors are visible. A binary that predates `--stdio`, such as v0.1.1 or v0.1.2, runs as the FIFO sidecar instead, with one warning per run. A binary that cannot run at all exits 1 and shows its own error.
-- Keep the legacy `/tmp/<runner_id>_1` and `_2` FIFOs for this release. Set `SELECTIVE_TRANSPORT_FIFO=1` (also `true` or `yes`) to use them.
+- Breaking: the FIFO transport is gone. Transport 0.2.0 or newer, which supports `--stdio`, is required. A binary without `--stdio` makes the runner exit 1 straight away, and `SELECTIVE_TRANSPORT_FIFO` is no longer read.
 - Honor `SELECTIVE_TRANSPORT` as an explicit path to the transport binary.
 - Exit promptly on SIGTERM or SIGINT during a stalled test-map upload. The upload's child process is killed instead of waited on for up to its 120 second read timeout.
 - Kill a stdio transport that ignores TERM when shutting it down.

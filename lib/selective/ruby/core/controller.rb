@@ -123,13 +123,9 @@ module Selective
         # One connection: true when the run finished on it, false when it was
         # lost and the caller should reconnect.
         def connect_and_run(reconnect:)
-          if stdio?
-            @pipe = StdioTransport.open(transport_binary, transport_url(reconnect: reconnect))
-            @transport_pid = @pipe.pid
-          else
-            @pipe = NamedPipe.new("/tmp/#{runner_id}_2", "/tmp/#{runner_id}_1")
-            @transport_pid = spawn_transport_process(reconnect: reconnect)
-          end
+          ensure_transport_supports_stdio!
+          @pipe = StdioTransport.open(transport_binary, transport_url(reconnect: reconnect))
+          @transport_pid = @pipe.pid
 
           handle_termination_signals(transport_pid)
           wait_for_connectivity
@@ -215,12 +211,6 @@ module Selective
           end
         end
 
-        def spawn_transport_process(reconnect: false)
-          Process.spawn(transport_binary, transport_url(reconnect: reconnect), runner_id).tap do |pid|
-            Process.detach(pid)
-          end
-        end
-
         def ensure_transport_binary!
           explicit = ENV["SELECTIVE_TRANSPORT"].to_s
           path = explicit.empty? ? File.join(ROOT_GEM_PATH, "lib", "bin", "transport") : explicit
@@ -251,24 +241,11 @@ module Selective
           @transport_binary ||= ensure_transport_binary!
         end
 
-        def stdio?
-          @stdio = !fifo_requested? && transport_supports_stdio? if @stdio.nil?
-          @stdio
-        end
-
-        def fifo_requested?
-          %w[1 true yes].include?(ENV["SELECTIVE_TRANSPORT_FIFO"].to_s.downcase)
-        end
-
-        def transport_supports_stdio?
+        def ensure_transport_supports_stdio!
           help = Open3.capture2e(transport_binary, "--help").first.scrub
-          return true if help.include?("--stdio")
+          return if help.include?("--stdio")
 
-          predates_stdio = help.include?("<url> <runner_id>")
-          with_error_handling { raise "#{transport_binary} could not be run:\n#{help}" } unless predates_stdio
-
-          print_warning("#{transport_binary} does not support --stdio, so this run uses the FIFO sidecar. Update the transport to use stdio.")
-          false
+          with_error_handling { raise "#{transport_binary} does not support --stdio. selective-ruby-core needs transport 0.2.0 or newer. Run bin/get_transport.\n#{help}" }
         end
 
         def wait_for_connectivity
@@ -286,11 +263,6 @@ module Selective
 
           loop do
             message = pipe.read
-
-            # The message is nil until the transport opens the pipe
-            # for writing. So, we must handle that here.
-            next sleep(0.1) if message.nil?
-
             response = JSON.parse(message, symbolize_names: true)
             if response[:command] == "connected"
               @connectivity = true

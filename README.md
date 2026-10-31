@@ -50,12 +50,8 @@ whose contents are `exit` shuts the transport down and is not a test result.
 The transport's own logs are inherited on stderr, so a refused connection is
 printed by the transport itself.
 
-`SELECTIVE_TRANSPORT_FIFO=1` keeps the previous sidecar for this release. That
-mode still creates `/tmp/<runner_id>_1` and `/tmp/<runner_id>_2` and still
-passes the URL and runner id as arguments. Stdio does not create those FIFOs.
-
-A binary without `--stdio`, such as v0.1.1 or v0.1.2, runs as the FIFO sidecar
-instead, and the runner prints one warning. A binary that cannot run at all
+A binary without `--stdio`, such as v0.1.1 or v0.1.2, is rejected before it
+starts: the runner exits 1 and asks for transport 0.2.0 or newer. A binary that cannot run at all
 exits 1 with its own error. `bin/get_transport` builds the commit in `TRANSPORT_REF` at the top of
 that script, which needs a Rust toolchain. Change `TRANSPORT_REF` to a release
 tag such as `v0.2.0` once a release includes `--stdio`; a tag is downloaded

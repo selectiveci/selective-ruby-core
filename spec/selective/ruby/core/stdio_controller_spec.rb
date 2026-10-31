@@ -7,7 +7,6 @@ require "tmpdir"
 
 RSpec.describe "stdio controller" do
   let(:fake_transport) { File.expand_path("../../../support/fake_stdio_transport.rb", __dir__) }
-  let(:fake_fifo_transport) { File.expand_path("../../../support/fake_fifo_transport.rb", __dir__) }
   let(:directory) { Dir.mktmpdir("selective-stdio-controller") }
   let(:build_env) do
     {
@@ -54,7 +53,6 @@ RSpec.describe "stdio controller" do
     threads = Thread.list
     with_env(
       "SELECTIVE_TRANSPORT" => fake_transport,
-      "SELECTIVE_TRANSPORT_FIFO" => nil,
       "SELECTIVE_FAKE_MODE" => ENV["SELECTIVE_FAKE_MODE"],
       "SELECTIVE_FAKE_DIR" => directory
     ) { example.run }
@@ -221,25 +219,23 @@ RSpec.describe "stdio controller" do
     end
   end
 
-  it "falls back to the FIFO sidecar with one warning when the binary predates stdio" do
-    File.chmod(0o755, fake_fifo_transport)
-    with_env("SELECTIVE_TRANSPORT" => fake_fifo_transport) do
-      statuses = []
-      allow(controller).to receive(:exit) { |code| statuses << code }
+  it "refuses a binary without --stdio before starting a transport" do
+    path = File.join(directory, "legacy-transport")
+    File.write(path, "#!/bin/sh\necho \"Usage: $0 <url> <runner_id>\"\n")
+    File.chmod(0o755, path)
+    with_env("SELECTIVE_TRANSPORT" => path) do
+      allow(controller).to receive(:exit).with(1).and_raise(SystemExit.new(1))
+      allow(Selective::Ruby::Core::StdioTransport).to receive(:open)
 
-      Timeout.timeout(10) { controller.start }
+      Timeout.timeout(5) { expect { controller.start }.to raise_error(SystemExit) }
 
-      spawns = Dir[File.join(directory, "fifo-*.json")].sort.map { |path| JSON.parse(File.read(path))["argv"] }
-      expect(spawns.size).to eq(2)
-      expect(spawns.map(&:last).uniq).to eq(["stdio-runner"])
-      expect(spawns.first.first).to include("api_key=test-api-key")
-      expect(controller.retries).to eq(1)
-      expect(statuses).to eq([0])
-      expect(controller).to have_received(:puts_indented).with(/fake_fifo_transport.rb does not support --stdio/).once
+      expect(controller).to have_received(:puts_indented).with(/#{path} does not support --stdio.*transport 0\.2\.0 or newer.*bin\/get_transport/m)
+      expect(Selective::Ruby::Core::StdioTransport).not_to have_received(:open)
+      expect(reports).to be_empty
     end
   end
 
-  it "shows the binary's own error, without FIFO advice, when it cannot run" do
+  it "shows the binary's own error when it cannot run" do
     path = File.join(directory, "unloadable-transport")
     File.write(path, "#!/bin/sh\nprintf '\\377\\n' >&2\necho \"$0: version \\`GLIBC_2.34' not found\" >&2\nexit 1\n")
     File.chmod(0o755, path)
@@ -247,8 +243,7 @@ RSpec.describe "stdio controller" do
       allow(controller).to receive(:exit).with(1).and_raise(SystemExit.new(1))
 
       expect { controller.start }.to raise_error(SystemExit)
-      expect(controller).to have_received(:puts_indented).with(/unloadable-transport could not be run:\n.*GLIBC_2\.34' not found/m)
-      expect(controller).not_to have_received(:puts_indented).with(/FIFO/)
+      expect(controller).to have_received(:puts_indented).with(/unloadable-transport does not support --stdio.*\n.*GLIBC_2\.34' not found/m)
       expect(reports).to be_empty
     end
   end
