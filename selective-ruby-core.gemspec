@@ -29,7 +29,7 @@ Gem::Specification.new do |spec|
   # The `git ls-files -z` loads the files in the RubyGem that have been added into git.
   spec.files = Dir.chdir(__dir__) do
     `git ls-files -z`.split("\x0").reject do |f|
-      (File.expand_path(f) == __FILE__) || f.start_with?(*%w[bin/ test/ spec/ features/ log/ .git .circleci appveyor .rspec .ruby-version .standard.yml README.md CHANGELOG.md CODE_OF_CONDUCT.md Gemfile])
+      (File.expand_path(f) == __FILE__) || f.start_with?(*%w[bin/ docs/ rubocop/ simplicity/ test/ spec/ features/ log/ .git .circleci appveyor .rspec .ruby-version .standard.yml .rubocop-simplicity.yml README.md CHANGELOG.md CODE_OF_CONDUCT.md AGENTS.md Gemfile])
     end
   end
 

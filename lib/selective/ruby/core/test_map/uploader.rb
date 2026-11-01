@@ -88,10 +88,21 @@ module Selective
               file.flush
 
               env = CLEAN_ENV.merge("SELECTIVE_TEST_MAP_UPLOAD_KEY" => @api_key.to_s)
-              out, err, status = Open3.capture3(env, RbConfig.ruby, "-e", CHILD_SCRIPT, @uri.to_s, file.path)
+              out, err, status = run_child(env, file.path)
               raise "HTTP #{out.strip}: #{err.strip}" unless status.success?
 
               true
+            end
+          end
+
+          def run_child(env, path)
+            Open3.popen3(env, RbConfig.ruby, "-e", CHILD_SCRIPT, @uri.to_s, path) do |stdin, stdout, stderr, child|
+              stdin.close
+              readers = [stdout, stderr].map { |io| Thread.new { io.read } }
+              [*readers.map(&:value), child.value]
+            ensure
+              Process.kill("KILL", child.pid) if child.alive?
+              readers&.each(&:join)
             end
           end
 

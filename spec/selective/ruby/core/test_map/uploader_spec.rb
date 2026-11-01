@@ -34,6 +34,24 @@ RSpec.describe Selective::Ruby::Core::TestMap::Uploader do
       runner_id: "0")
   end
 
+  it "kills the upload child when interrupted instead of waiting for a stalled server" do
+    server = TCPServer.new("127.0.0.1", 0)
+    connected = Queue.new
+    acceptor = Thread.new { connected << server.accept }
+    upload = Thread.new { uploader(server.addr[1]).upload(fragment) }
+    upload.report_on_exception = false
+    Timeout.timeout(10) { connected.pop }
+
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    upload.raise(Interrupt)
+
+    expect { upload.join(10) }.to raise_error(Interrupt)
+    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 5
+  ensure
+    server&.close
+    acceptor&.kill
+  end
+
   it "posts the gzipped fragment with the api key" do
     port, received, thread, server = serve(200)
     expect(uploader(port).upload(fragment)).to be(true)
