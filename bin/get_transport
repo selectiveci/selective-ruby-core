@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-TRANSPORT_REF=57f5dc6f56fca0ccfc4afcfa12dc5f7482015c7f
+TRANSPORT_REF=v0.2.0
 
 os=${1:-$(uname -s)}
 arch=${2:-$(uname -m)}
@@ -21,38 +21,36 @@ if [ "$arch" != "aarch64" ] && [ "$arch" != "x86_64" ]; then
   exit 1
 fi
 
+asset="transport-${os}-${arch}.tar.gz"
+
+case "$asset" in
+  transport-Darwin-aarch64.tar.gz) expected=7dcaec969378a181a62749673b9c0b658be17bf16a8880f5effbd8e03a6c4a17 ;;
+  transport-Darwin-x86_64.tar.gz) expected=ccb9f795086d5584ff605cff8aefc534a82cde3154a3231f7f9396cde27bf7d4 ;;
+  transport-Linux-aarch64.tar.gz) expected=cf54fbf596b8a708fbc64e031f98737f076b8c32c371a4506c8141c49bca84be ;;
+  transport-Linux-x86_64.tar.gz) expected=87b2d6847ed0efa44c73ec16526b85134bf6f2e3759d99f925682eaf1b27d937 ;;
+esac
+
 root="$(cd "$(dirname "$0")/.." && pwd)"
 dest="$root/lib/bin"
+archive="$root/tmp/$asset"
 mkdir -p "$dest" "$root/tmp"
+trap 'rm -f "$archive"' EXIT
 
-if [[ "$TRANSPORT_REF" == v* ]]; then
-  archive="$root/tmp/transport.tar.gz"
-  curl -L --fail --silent --show-error \
-    "https://github.com/selectiveci/transport/releases/download/${TRANSPORT_REF}/transport-${os}-${arch}.tar.gz" \
-    -o "$archive"
-  tar -xzf "$archive" -C "$dest"
-  rm "$archive"
-  exit 0
+curl -L --fail --silent --show-error \
+  "https://github.com/selectiveci/transport/releases/download/${TRANSPORT_REF}/${asset}" \
+  -o "$archive"
+
+if command -v sha256sum >/dev/null 2>&1; then
+  actual="$(sha256sum "$archive" | cut -d' ' -f1)"
+else
+  actual="$(shasum -a 256 "$archive" | cut -d' ' -f1)"
 fi
 
-host_os="$(uname -s)"
-host_arch="$(uname -m)"
-if [ "$host_os" = "Darwin" ] && [ "$host_arch" = "arm64" ]; then
-  host_arch="aarch64"
-fi
-
-if [ "$os" != "$host_os" ] || [ "$arch" != "$host_arch" ]; then
-  echo "TRANSPORT_REF ${TRANSPORT_REF} is a commit, so only the host binary can be built. Set it to a release tag to fetch ${os} ${arch}." >&2
+if [ "$actual" != "$expected" ]; then
+  echo "Checksum mismatch for $asset" >&2
+  echo "  expected: $expected" >&2
+  echo "  actual:   $actual" >&2
   exit 1
 fi
 
-src="$root/tmp/transport-src"
-if [ ! -d "$src/.git" ]; then
-  git init -q "$src"
-  git -C "$src" remote add origin https://github.com/selectiveci/transport
-fi
-git -C "$src" fetch --depth 1 -q origin "$TRANSPORT_REF"
-git -C "$src" checkout -q --force FETCH_HEAD
-cargo build --release --manifest-path "$src/Cargo.toml"
-cp "$src/target/release/transport" "$dest/transport"
-chmod +x "$dest/transport"
+tar -xzf "$archive" -C "$dest"
