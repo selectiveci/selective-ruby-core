@@ -34,6 +34,11 @@ RSpec.describe "build_env.sh" do
     MINT_GIT_REPOSITORY_URL
     SELECTIVE_GIT_BRANCH SELECTIVE_GIT_PROVIDER GITHUB_EVENT_PATH
     SELECTIVE_BASE_SHA SEMAPHORE_GIT_COMMIT_RANGE
+    GITLAB_CI CI_MERGE_REQUEST_SOURCE_BRANCH_NAME CI_COMMIT_BRANCH
+    CI_COMMIT_REF_NAME CI_MERGE_REQUEST_TARGET_BRANCH_NAME GITLAB_USER_LOGIN
+    CI_COMMIT_SHA CI_PIPELINE_ID CI_NODE_INDEX CI_MERGE_REQUEST_TITLE
+    CI_COMMIT_TITLE CI_COMMIT_AUTHOR CI_PROJECT_PATH
+    CI_MERGE_REQUEST_DIFF_BASE_SHA CI_COMMIT_BEFORE_SHA
   ].freeze
 
   # Run the script with a fresh environment and return parsed JSON output.
@@ -149,15 +154,27 @@ RSpec.describe "build_env.sh" do
       expect(out["git_repo_full_name"]).to eq("acme/widgets")
     end
 
-    it "does not emit a slug for non-github Buildkite pipelines" do
+    it "does not emit a slug for unsupported Buildkite providers" do
       env = {
         "BUILDKITE" => "true",
-        "BUILDKITE_PIPELINE_PROVIDER" => "gitlab",
-        "BUILDKITE_REPO" => "git@gitlab.com:acme/widgets.git",
+        "BUILDKITE_PIPELINE_PROVIDER" => "bitbucket",
+        "BUILDKITE_REPO" => "git@bitbucket.org:acme/widgets.git",
         "BUILDKITE_COMMIT" => "abc123"
       }
       out = run_with(env)
       expect(out["git_repo_full_name"]).to eq("")
+      expect(out["git_provider"]).to eq("bitbucket")
+    end
+
+    it "reads the GitLab path from a gitlab Buildkite pipeline's repo URL" do
+      env = {
+        "BUILDKITE" => "true",
+        "BUILDKITE_PIPELINE_PROVIDER" => "gitlab",
+        "BUILDKITE_REPO" => "git@gitlab.com:acme/platform/widgets.git",
+        "BUILDKITE_COMMIT" => "abc123"
+      }
+      out = run_with(env)
+      expect(out["git_repo_full_name"]).to eq("acme/platform/widgets")
       expect(out["git_provider"]).to eq("gitlab")
     end
 
@@ -175,16 +192,16 @@ RSpec.describe "build_env.sh" do
       expect(out["git_provider"]).to eq("github")
     end
 
-    it "ignores RWX_GIT_REPOSITORY_NAME when the URL is not github" do
+    it "ignores RWX_GIT_REPOSITORY_NAME when the URL is an unsupported host" do
       env = {
         "RWX" => "true",
         "RWX_GIT_REPOSITORY_NAME" => "acme/widgets",
-        "RWX_GIT_REPOSITORY_URL" => "https://gitlab.com/acme/widgets.git",
+        "RWX_GIT_REPOSITORY_URL" => "https://bitbucket.org/acme/widgets.git",
         "RWX_GIT_COMMIT_SHA" => "abc123"
       }
       out = run_with(env)
       expect(out["git_repo_full_name"]).to eq("")
-      expect(out["git_provider"]).to eq("gitlab")
+      expect(out["git_provider"]).to eq("bitbucket")
     end
 
     it "honors MINT legacy env vars when RWX is absent" do
@@ -299,6 +316,75 @@ RSpec.describe "build_env.sh" do
     it "emits empty base_sha when no source is available" do
       out = run_with({})
       expect(out["base_sha"]).to eq("")
+    end
+  end
+
+  describe "GitLab CI" do
+    let(:base_env) do
+      {
+        "GITLAB_CI" => "true",
+        "CI_PROJECT_PATH" => "acme/platform/widgets",
+        "CI_COMMIT_SHA" => "head123",
+        "CI_PIPELINE_ID" => "991",
+        "CI_NODE_INDEX" => "2",
+        "CI_COMMIT_TITLE" => "Fix the thing",
+        "CI_COMMIT_AUTHOR" => "Ada Lovelace <ada@example.com>",
+        "GITLAB_USER_LOGIN" => "ada"
+      }
+    end
+
+    it "reads a merge request pipeline" do
+      out = run_with(base_env.merge(
+        "CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" => "feature",
+        "CI_MERGE_REQUEST_TARGET_BRANCH_NAME" => "main",
+        "CI_MERGE_REQUEST_DIFF_BASE_SHA" => "base456",
+        "CI_MERGE_REQUEST_TITLE" => "Add widgets",
+        "CI_COMMIT_REF_NAME" => "refs/merge-requests/7/head"
+      ))
+
+      expect(out).to include(
+        "platform" => "gitlab_ci",
+        "git_provider" => "gitlab",
+        "git_repo_full_name" => "acme/platform/widgets",
+        "branch" => "feature",
+        "target_branch" => "main",
+        "base_sha" => "base456",
+        "sha" => "head123",
+        "run_id" => "991",
+        "runner_id" => "2",
+        "pr_title" => "Add widgets",
+        "commit_message" => "Fix the thing",
+        "committer_name" => "Ada Lovelace",
+        "committer_email" => "ada@example.com",
+        "actor" => "ada"
+      )
+    end
+
+    it "uses the push's previous commit on a branch pipeline" do
+      out = run_with(base_env.merge("CI_COMMIT_BRANCH" => "main", "CI_COMMIT_BEFORE_SHA" => "prev789"))
+      expect(out["branch"]).to eq("main")
+      expect(out["base_sha"]).to eq("prev789")
+      expect(out["target_branch"]).to eq("")
+    end
+
+    it "treats an all-zero before sha (a new branch) as no base" do
+      out = run_with(base_env.merge("CI_COMMIT_BEFORE_SHA" => "0" * 40))
+      expect(out["base_sha"]).to eq("")
+    end
+  end
+
+  describe "gitlab.com URL parsing" do
+    {
+      "git@gitlab.com:acme/platform/widgets.git" => "acme/platform/widgets",
+      "https://gitlab.com/acme/widgets.git" => "acme/widgets",
+      "https://gitlab-ci-token:secret@gitlab.com/acme/sub/widgets.git" => "acme/sub/widgets",
+      "ssh://git@gitlab.com/acme/widgets" => "acme/widgets"
+    }.each do |url, expected|
+      it "parses #{url.sub(/:secret@/, ":***@")}" do
+        out = run_with("RWX" => "true", "RWX_GIT_REPOSITORY_URL" => url, "RWX_GIT_COMMIT_SHA" => "abc")
+        expect(out["git_provider"]).to eq("gitlab")
+        expect(out["git_repo_full_name"]).to eq(expected)
+      end
     end
   end
 

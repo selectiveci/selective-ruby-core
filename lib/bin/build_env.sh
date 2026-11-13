@@ -11,6 +11,18 @@ parse_github_slug() {
   esac
 }
 
+# Parse a "group/subgroup/project" path out of a gitlab.com remote URL (SSH or
+# HTTPS). GitLab nests groups, so everything after the host is the path.
+# Self-managed hosts can't be recognized from the URL; GitLab CI says so itself.
+parse_gitlab_path() {
+  local url="$1"
+  case "$url" in
+    git@gitlab.com:*|https://gitlab.com/*|http://gitlab.com/*|ssh://git@gitlab.com/*|https://*@gitlab.com/*)
+      echo "$url" | sed -E 's#^(git@|(https?|ssh)://([^@/]+@)?)gitlab\.com[:/]##; s#\.git/?$##; s#/$##'
+      ;;
+  esac
+}
+
 # Given a git remote URL, classify the provider as github|gitlab|bitbucket or
 # empty when unrecognized. Used for the git_provider hint.
 detect_git_provider_from_url() {
@@ -53,6 +65,28 @@ if [ -n "$GITHUB_ACTIONS" ]; then
       base_sha=""
     fi
   fi
+elif [ -n "$GITLAB_CI" ]; then
+  platform=gitlab_ci
+  branch=${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-${CI_COMMIT_BRANCH:-$CI_COMMIT_REF_NAME}}
+  target_branch=$CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+  actor=$GITLAB_USER_LOGIN
+  sha=$CI_COMMIT_SHA
+  run_id=$CI_PIPELINE_ID
+  run_attempt=1
+  runner_id=$CI_NODE_INDEX
+  pr_title=$CI_MERGE_REQUEST_TITLE
+  commit_message=$CI_COMMIT_TITLE
+  # CI_COMMIT_AUTHOR is "Name <email>".
+  committer_name=$(echo "$CI_COMMIT_AUTHOR" | sed -E 's/ *<[^>]*>$//')
+  committer_email=$(echo "$CI_COMMIT_AUTHOR" | sed -nE 's/.*<([^>]*)>$/\1/p')
+  git_repo_full_name=$CI_PROJECT_PATH
+  git_provider=gitlab
+  # Merge request pipelines give the merge base directly; branch pipelines
+  # give the commit the push started from.
+  base_sha=${CI_MERGE_REQUEST_DIFF_BASE_SHA:-$CI_COMMIT_BEFORE_SHA}
+  if [ "$base_sha" = "0000000000000000000000000000000000000000" ]; then
+    base_sha=""
+  fi
 elif [ -n "$CIRCLECI" ]; then
   platform=circleci
   branch=$CIRCLE_BRANCH
@@ -64,12 +98,14 @@ elif [ -n "$CIRCLECI" ]; then
   committer_name=$(git show -s --format='%an' -n 1 $sha)
   committer_email=$(git show -s --format='%ae' -n 1 $sha)
   # CircleCI has no single "slug" env var. Compose from username + reponame.
-  # These work for both GitHub OAuth and GitHub App pipelines. For non-GitHub
-  # pipelines (GitLab, Bitbucket) the same vars exist but we gate on the repo
-  # URL to avoid emitting a non-GitHub slug.
+  # These work for both GitHub OAuth and GitHub App pipelines. GitLab nests
+  # groups, so its path comes from the repo URL instead; other providers
+  # (Bitbucket) get no slug.
   if [ -n "$CIRCLE_PROJECT_USERNAME" ] && [ -n "$CIRCLE_PROJECT_REPONAME" ]; then
     git_provider=$(detect_git_provider_from_url "$CIRCLE_REPOSITORY_URL")
-    if [ "$git_provider" = "github" ] || [ -z "$CIRCLE_REPOSITORY_URL" ]; then
+    if [ "$git_provider" = "gitlab" ]; then
+      git_repo_full_name=$(parse_gitlab_path "$CIRCLE_REPOSITORY_URL")
+    elif [ "$git_provider" = "github" ] || [ -z "$CIRCLE_REPOSITORY_URL" ]; then
       git_repo_full_name="${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}"
       # If we fell through the "no repo URL" path, default provider to github
       # since the slug composition path is specific to GitHub-style owner/repo.
@@ -92,7 +128,7 @@ elif [ -n "$SEMAPHORE" ]; then
   committer_name=$(git show -s --format='%an' -n 1 $sha)
   committer_email=$(git show -s --format='%ae' -n 1 $sha)
   git_provider=$SEMAPHORE_GIT_PROVIDER
-  if [ "$git_provider" = "github" ]; then
+  if [ "$git_provider" = "github" ] || [ "$git_provider" = "gitlab" ]; then
     git_repo_full_name=$SEMAPHORE_GIT_REPO_SLUG
   fi
   # SEMAPHORE_GIT_COMMIT_RANGE is "<base>...<head>" on push/PR events; take the
@@ -117,6 +153,9 @@ elif [ -n "$BUILDKITE" ]; then
   if [ "$BUILDKITE_PIPELINE_PROVIDER" = "github" ]; then
     git_provider=github
     git_repo_full_name=$(parse_github_slug "$BUILDKITE_REPO")
+  elif [ "$BUILDKITE_PIPELINE_PROVIDER" = "gitlab" ]; then
+    git_provider=gitlab
+    git_repo_full_name=$(parse_gitlab_path "$BUILDKITE_REPO")
   else
     git_provider=$BUILDKITE_PIPELINE_PROVIDER
   fi
@@ -140,6 +179,8 @@ elif [ -n "$RWX" ]; then
   git_provider=$(detect_git_provider_from_url "$RWX_GIT_REPOSITORY_URL")
   if [ "$git_provider" = "github" ]; then
     git_repo_full_name="${RWX_GIT_REPOSITORY_NAME}"
+  elif [ "$git_provider" = "gitlab" ]; then
+    git_repo_full_name=$(parse_gitlab_path "$RWX_GIT_REPOSITORY_URL")
   fi
 elif [ -n "$MINT" ]; then
   platform=rwx
@@ -158,6 +199,8 @@ elif [ -n "$MINT" ]; then
   git_provider=$(detect_git_provider_from_url "$MINT_GIT_REPOSITORY_URL")
   if [ "$git_provider" = "github" ]; then
     git_repo_full_name="${MINT_GIT_REPOSITORY_NAME}"
+  elif [ "$git_provider" = "gitlab" ]; then
+    git_repo_full_name=$(parse_gitlab_path "$MINT_GIT_REPOSITORY_URL")
   fi
 fi
 
@@ -169,9 +212,13 @@ if [ -z "$git_repo_full_name" ] && command -v git >/dev/null 2>&1; then
   origin_url=$(git config --get remote.origin.url 2>/dev/null || true)
   if [ -n "$origin_url" ]; then
     parsed_slug=$(parse_github_slug "$origin_url")
+    parsed_gitlab=$(parse_gitlab_path "$origin_url")
     if [ -n "$parsed_slug" ]; then
       git_repo_full_name="$parsed_slug"
       [ -z "$git_provider" ] && git_provider=github
+    elif [ -n "$parsed_gitlab" ]; then
+      git_repo_full_name="$parsed_gitlab"
+      [ -z "$git_provider" ] && git_provider=gitlab
     elif [ -z "$git_provider" ]; then
       git_provider=$(detect_git_provider_from_url "$origin_url")
     fi
