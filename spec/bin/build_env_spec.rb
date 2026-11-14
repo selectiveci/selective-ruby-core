@@ -33,7 +33,7 @@ RSpec.describe "build_env.sh" do
     MINT_GIT_COMMITTER_NAME MINT_GIT_COMMITTER_EMAIL MINT_GIT_REPOSITORY_NAME
     MINT_GIT_REPOSITORY_URL
     SELECTIVE_GIT_BRANCH SELECTIVE_GIT_PROVIDER GITHUB_EVENT_PATH
-    SELECTIVE_BASE_SHA SEMAPHORE_GIT_COMMIT_RANGE
+    SELECTIVE_BASE_SHA SEMAPHORE_GIT_COMMIT_RANGE SELECTIVE_HEAD_SHA SELECTIVE_SHA
   ].freeze
 
   # Run the script with a fresh environment and return parsed JSON output.
@@ -299,6 +299,45 @@ RSpec.describe "build_env.sh" do
     it "emits empty base_sha when no source is available" do
       out = run_with({})
       expect(out["base_sha"]).to eq("")
+    end
+  end
+
+  describe "head_sha" do
+    it "is the pull request's head commit, not GitHub's merge commit" do
+      Dir.mktmpdir do |tmp|
+        event_path = File.join(tmp, "event.json")
+        File.write(event_path, JSON.dump(
+          "pull_request" => { "base" => { "sha" => "basefeedfeed" }, "head" => { "sha" => "prheadfeed" } }
+        ))
+        env = {
+          "GITHUB_ACTIONS" => "true",
+          "GITHUB_REPOSITORY" => "acme/widgets",
+          "GITHUB_SHA" => "mergefeedfeed",
+          "GITHUB_EVENT_PATH" => event_path
+        }
+        out = run_with(env)
+        expect(out["sha"]).to eq("mergefeedfeed")
+        expect(out["head_sha"]).to eq("prheadfeed")
+      end
+    end
+
+    it "is the commit sha on a push" do
+      Dir.mktmpdir do |tmp|
+        event_path = File.join(tmp, "event.json")
+        File.write(event_path, JSON.dump("before" => "beforesha1234", "after" => "headfeedfeed"))
+        env = {
+          "GITHUB_ACTIONS" => "true",
+          "GITHUB_REPOSITORY" => "acme/widgets",
+          "GITHUB_SHA" => "headfeedfeed",
+          "GITHUB_EVENT_PATH" => event_path
+        }
+        expect(run_with(env)["head_sha"]).to eq("headfeedfeed")
+      end
+    end
+
+    it "follows SELECTIVE_SHA, and SELECTIVE_HEAD_SHA overrides both" do
+      expect(run_with("SELECTIVE_SHA" => "oversha")["head_sha"]).to eq("oversha")
+      expect(run_with("SELECTIVE_SHA" => "oversha", "SELECTIVE_HEAD_SHA" => "overhead")["head_sha"]).to eq("overhead")
     end
   end
 

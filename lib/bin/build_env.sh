@@ -44,6 +44,8 @@ if [ -n "$GITHUB_ACTIONS" ]; then
   if [ -f "$GITHUB_EVENT_PATH" ]; then
     if command -v jq >/dev/null 2>&1; then
       base_sha=$(jq -r '.pull_request.base.sha // .before // empty' < "$GITHUB_EVENT_PATH" 2>/dev/null)
+      # On pull_request events GITHUB_SHA is GitHub's merge commit; this is the branch's own commit.
+      head_sha=$(jq -r '.pull_request.head.sha // empty' < "$GITHUB_EVENT_PATH" 2>/dev/null)
     else
       base_sha=$(grep -o '"before"[[:space:]]*:[[:space:]]*"[^"]*"' "$GITHUB_EVENT_PATH" | head -1 | sed -E 's/.*"[^"]*"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')
     fi
@@ -194,6 +196,7 @@ cat <<EOF
     "actor": "$(escape "${SELECTIVE_ACTOR:-$actor}")",
     "sha": "$(escape "${SELECTIVE_SHA:-$sha}")",
     "base_sha": "$(escape "${SELECTIVE_BASE_SHA:-$base_sha}")",
+    "head_sha": "$(escape "${SELECTIVE_HEAD_SHA:-${head_sha:-${SELECTIVE_SHA:-$sha}}}")",
     "run_id": "$(escape "${SELECTIVE_RUN_ID:-$run_id}")",
     "run_attempt": "$(escape "${SELECTIVE_RUN_ATTEMPT:-$run_attempt}")",
     "runner_id": "$(escape "${SELECTIVE_RUNNER_ID:-$runner_id}")",
