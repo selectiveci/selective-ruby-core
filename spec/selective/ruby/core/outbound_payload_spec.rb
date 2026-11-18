@@ -29,10 +29,7 @@ RSpec.describe Selective::Ruby::Core::Controller do
   }.freeze
 
   around do |example|
-    previous = REQUIRED_ENV.keys.to_h { |k| [k, ENV[k]] }
-    REQUIRED_ENV.each { |k, v| ENV[k] = v }
-    example.run
-    previous.each { |k, v| ENV[k] = v }
+    with_env(REQUIRED_ENV) { example.run }
   end
 
   before do
