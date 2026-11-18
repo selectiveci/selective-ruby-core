@@ -1,3 +1,7 @@
+## [0.3.2] - 2026-11-18
+- Allow zeitwerk 2.7 and 2.8. The `~> 2.6.12` pin made Rails apps on current zeitwerk downgrade their autoloader to install Selective.
+- A test that asserts on binary data no longer kills the runner. Outbound payloads replace invalid UTF-8 with U+FFFD and write NUL as its printable escape; before, one such result stopped the runner and the run recorded nothing.
+
 ## [0.3.1] - 2026-11-14
 - Send `head_sha`, the commit the branch points at. On GitHub Actions pull requests `sha` is GitHub's merge commit, which exists only in CI; `head_sha` is the pull request's head, so `sel tail` finds the build from a developer's checkout. Elsewhere it equals `sha`. `SELECTIVE_HEAD_SHA` overrides it.
 
