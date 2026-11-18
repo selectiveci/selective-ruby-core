@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+log="$1"
+
+summary=$(grep -aoE '^[[:space:]]*[0-9]+ examples?, [0-9]+ failures?' "$log" | tail -n 1 || true)
+
+if [[ -n "$summary" ]]; then
+  read -r examples _ failures _ <<<"$summary"
+  if (( failures > 0 )); then
+    echo "runner reported $failures failures" >&2
+    exit 1
+  fi
+  echo "$examples"
+elif grep -aqF 'The run has completed already' "$log"; then
+  echo 0
+else
+  echo "no rspec summary and no 'completed already' notice in $log" >&2
+  exit 1
+fi

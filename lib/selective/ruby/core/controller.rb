@@ -7,8 +7,12 @@ module Selective
     module Core
       class Controller
         include Helper
+
         @@selective_suppress_reporting = false
         @@report_at_finish = {}
+
+        TERMINATION_REPORT_GRACE = 0.25
+        CONNECT_TIMEOUT = 30
 
         REQUIRED_CONFIGURATION = {
           "host" => "SELECTIVE_HOST",
@@ -24,21 +28,25 @@ module Selective
 
         def initialize(runner_class, runner_args, debug: false, log: false)
           @debug = debug
+          @log = log
           @runner = runner_class.new(runner_args, method(:test_case_callback))
           @retries = 0
-          @runner_id = safe_filename(get_runner_id)
-          @logger = init_logger(log)
+          @pending_commands = []
         end
 
+        # A lost connection is retried by looping here, not by calling start
+        # again from inside the rescue clause. Everything a reconnected runner
+        # does -- the rest of the run, the close, the framework's after_run
+        # hooks -- would otherwise run inside that clause, where `$!` is still
+        # the ConnectionLostError. SimpleCov's after_run hook reads that as the
+        # run having crashed and exits 1, so every CI shard whose connection
+        # dropped once failed with no failing test.
         def start(reconnect: false)
-          @pipe = NamedPipe.new("/tmp/#{runner_id}_2", "/tmp/#{runner_id}_1")
-          @transport_pid = spawn_transport_process(reconnect: reconnect)
+          loop do
+            break if connect_and_run(reconnect: reconnect)
 
-          handle_termination_signals(transport_pid)
-          wait_for_connectivity
-          run_main_loop
-        rescue ConnectionLostError
-          retry!
+            reconnect = true
+          end
         rescue => e
           with_error_handling { raise e }
         end
@@ -67,7 +75,19 @@ module Selective
 
         private
 
-        attr_reader :runner, :pipe, :transport_pid, :retries, :logger, :runner_id, :diff
+        attr_reader :runner, :pipe, :transport_pid, :retries, :diff
+
+        # Resolved on first use rather than in the constructor: `selective
+        # exec` (the plain framework run behind the manifest dry-run) never
+        # connects, so it must not require the CI environment that naming a
+        # runner validates.
+        def runner_id
+          @runner_id ||= safe_filename(get_runner_id)
+        end
+
+        def logger
+          @logger ||= init_logger(@log)
+        end
 
         def get_runner_id
           runner_id = build_env["runner_id"]
@@ -87,25 +107,45 @@ module Selective
 
         def run_main_loop
           loop do
-            message = pipe.read
-            response = JSON.parse(message, symbolize_names: true)
+            response = next_command
 
-            @logger.info("Received Command: #{response}")
+            logger.info("Received Command: #{response}")
             break if handle_command(response) == :break
           end
         end
 
-        def retry!
+        def next_command
+          return @pending_commands.shift if @pending_commands.any?
+
+          JSON.parse(pipe.read, symbolize_names: true)
+        end
+
+        # One connection: true when the run finished on it, false when it was
+        # lost and the caller should reconnect.
+        def connect_and_run(reconnect:)
+          ensure_transport_supports_stdio!
+          @pipe = StdioTransport.open(transport_binary, transport_url(reconnect: reconnect))
+          @transport_pid = @pipe.pid
+
+          handle_termination_signals(transport_pid)
+          wait_for_connectivity
+          run_main_loop
+          true
+        rescue ConnectionLostError
+          prepare_retry!
+          false
+        end
+
+        def prepare_retry!
           @retries += 1
 
           with_error_handling { raise "Too many retries" } if retries > 10
 
           puts("Retrying in #{retries} seconds...") if debug?
-          sleep(retries > 4 ? 4 : retries)
+          sleep([retries, 4].min)
           kill_transport
 
           pipe.reset!
-          start(reconnect: true)
         end
 
         def write(data)
@@ -159,7 +199,7 @@ module Selective
             run_id = build_env["run_id"]
             run_attempt = build_env["run_attempt"]
 
-            metadata = build_env.reject { |k,v| %w(host runner_id api_key run_id run_attempt).include?(k) }
+            metadata = build_env.reject { |k, v| %w[host runner_id api_key run_id run_attempt].include?(k) }
 
             {
               "api_key" => api_key,
@@ -171,6 +211,13 @@ module Selective
               "framework" => runner.framework,
               "framework_version" => runner.framework_version,
               "framework_wrapper_version" => runner.wrapper_version,
+              "runtime_version" => RUBY_VERSION,
+              # "record", "select" or "0": whether this runner can record a
+              # test map, only run selected subsets, or neither.
+              "test_map" => TestMap.capability,
+              # Forces this run to record (e.g. a nightly full run), however
+              # fresh the current map is.
+              "test_map_record" => ENV["SELECTIVE_TEST_MAP_RECORD"].to_s
             }.merge(metadata: metadata.to_json)
           end
         end
@@ -191,43 +238,53 @@ module Selective
 
           with_error_handling do
             raise "Missing required environment variables: #{missing.join(", ")}" unless missing.empty?
-            raise "Invalid host: #{env['host']}" unless env['host'].match?(/^wss?:\/\//)
+            raise "Invalid host: #{env["host"]}" unless env["host"].match?(/^wss?:\/\//)
           end
         end
 
-        def spawn_transport_process(reconnect: false)
-          transport_path = File.join(ROOT_GEM_PATH, "lib", "bin", "transport")
-          get_transport_path = File.join(ROOT_GEM_PATH, "bin", "get_transport")
+        def ensure_transport_binary!
+          explicit = ENV["SELECTIVE_TRANSPORT"].to_s
+          path = explicit.empty? ? File.join(ROOT_GEM_PATH, "lib", "bin", "transport") : explicit
+          return path if File.exist?(path)
 
-          if !File.exist?(transport_path)
+          get_transport_path = File.join(ROOT_GEM_PATH, "bin", "get_transport")
+          if explicit.empty? && File.exist?(get_transport_path)
             # The get_transport script is not released with the gem, so this
             # code is intended for development/CI purposes.
-            if File.exist?(get_transport_path)
-              output, status = Open3.capture2e(get_transport_path)
-              if !status.success?
-                puts <<~TEXT
-                  Failed to download transport binary.
+            output, status = Open3.capture2e(get_transport_path)
+            unless status.success?
+              puts <<~TEXT
+                Failed to download transport binary.
 
-                  #{output}
-                TEXT
-              end
-            else
-              with_error_handling do
-                raise "Selective transport binary not found. Please contact support or compile it manually. See: https://github.com/selectiveci/transport"
-              end
+                #{output}
+              TEXT
+            end
+          else
+            with_error_handling do
+              raise "Selective transport binary not found. Please contact support or compile it manually. See: https://github.com/selectiveci/transport"
             end
           end
 
-          Process.spawn(transport_path, transport_url(reconnect: reconnect), runner_id).tap do |pid|
-            Process.detach(pid)
-          end
+          path
+        end
+
+        def transport_binary
+          @transport_binary ||= ensure_transport_binary!
+        end
+
+        def ensure_transport_supports_stdio!
+          help = Open3.capture2e(transport_binary, "--help").first.scrub
+          return if help.include?("--stdio")
+
+          with_error_handling { raise "#{transport_binary} does not support --stdio. selective-ruby-core needs transport 0.2.0 or newer. Run bin/get_transport.\n#{help}" }
         end
 
         def wait_for_connectivity
           @connectivity = false
+          @pending_commands = []
 
           Thread.new do
-            sleep(30)
+            Kernel.sleep(CONNECT_TIMEOUT)
             unless @connectivity
               puts "Transport process failed to start. Exiting..."
               kill_transport
@@ -237,40 +294,52 @@ module Selective
 
           loop do
             message = pipe.read
-
-            # The message is nil until the transport opens the pipe
-            # for writing. So, we must handle that here.
-            next sleep(0.1) if message.nil?
-
             response = JSON.parse(message, symbolize_names: true)
-            @connectivity = true if response[:command] == "connected"
-            break
+            if response[:command] == "connected"
+              @connectivity = true
+              break
+            end
+
+            @pending_commands << response
           end
         end
 
         def handle_termination_signals(pid)
           ["INT", "TERM"].each do |signal|
             Signal.trap(signal) do
-              # :nocov:
+              report_termination(signal)
               kill_transport(signal: signal)
-              exit
-              # :nocov:
+              exit(runner.exit_status)
             end
           end
+        end
+
+        # Tells the server this runner is being stopped on purpose, so a run
+        # whose runners all leave this way is recorded as cancelled rather
+        # than as runners lost. Best effort: a server that predates the
+        # message ignores it, and a dead pipe just means it isn't sent.
+        #
+        # The transport exits the moment it reads "exit", without draining
+        # what it has queued for the socket, so give it a moment to send this
+        # first. CI cancellations allow several seconds between TERM and KILL.
+        def report_termination(signal)
+          return unless pipe
+
+          write({type: "terminating", data: {signal: signal}})
+          sleep(TERMINATION_REPORT_GRACE)
+        rescue ConnectionLostError, IOError, SystemCallError, ThreadError
+          nil
         end
 
         def kill_transport(signal: "TERM")
           begin
             pipe.write "exit"
 
-            # Give up to 5 seconds for graceful exit
-            # before killing it below
-            1..5.times do
+            100.times do
               Process.getpgid(transport_pid)
-
-              sleep(1)
+              Kernel.sleep(0.05)
             end
-          rescue ConnectionLostError, IOError
+          rescue ConnectionLostError, IOError, ThreadError
             # If the pipe is close, move straight to killing
             # it forcefully.
           end
@@ -285,8 +354,8 @@ module Selective
         def handle_command(data)
           if respond_to? "handle_#{data[:command]}", true
             send("handle_#{data[:command]}", data)
-          else
-            raise "Unknown command received: #{data[:command]}" if debug?
+          elsif debug?
+            raise "Unknown command received: #{data[:command]}"
           end
         end
 
@@ -302,14 +371,33 @@ module Selective
 
         def handle_test_manifest(_data)
           self.class.restore_reporting!
-          @logger.info("Sending Response: test_manifest")
+          logger.info("Sending Response: test_manifest")
           data = {test_cases: runner.manifest["examples"] || runner.manifest["test_cases"]}
+          if TestMap.tree_requested? && (tree = test_map_tree)
+            data[:test_map_tree] = tree
+          end
           num_commits = build_env["num_commits"] || 1000
           if (diff = get_diff(num_commits))
             data[:modified_test_files] = modified_test_files(diff)
             data[:correlated_files] = correlated_files(diff, num_commits)
           end
           write({type: "test_manifest", data: data})
+        end
+
+        # Sent by servers that support test maps, before any tests are
+        # assigned. `tree: true` asks for a file-hash snapshot with the
+        # manifest; `record: true` turns on tracing for every test this runner
+        # executes.
+        def handle_configure_test_map(data)
+          recorder = TestMap.configure(
+            record: data[:record] == true,
+            tree: data[:tree] == true,
+            allocations: data[:allocations] != false
+          )
+          logger.info("Test map configured: record=#{!recorder.nil?} tree=#{TestMap.tree_requested?}")
+          if data[:record] == true && recorder.nil?
+            print_warning("Selective asked this runner to record a test map, but the native tracer isn't available. Tests will run normally.")
+          end
         end
 
         def handle_run_test_cases(data)
@@ -338,6 +426,8 @@ module Selective
             runner.finish unless exit_status.is_a?(Integer)
           end
 
+          upload_test_map
+
           kill_transport
           pipe.delete_pipes
           exit(exit_status || runner.exit_status)
@@ -346,20 +436,46 @@ module Selective
           :break
         end
 
+        def test_map_tree
+          TestMap::Tree.snapshot
+        rescue => e
+          logger.warn("Could not snapshot the repository for test selection: #{e.message}")
+          nil
+        end
+
+        def upload_test_map
+          recorder = TestMap.recorder
+          return if recorder.nil? || recorder.empty?
+
+          uploader = TestMap::Uploader.new(
+            host: build_env["host"],
+            api_key: build_env["api_key"],
+            run_id: build_env["run_id"],
+            run_attempt: build_env["run_attempt"],
+            runner_id: runner_id,
+            logger: logger
+          )
+          if uploader.upload(recorder.to_h)
+            logger.info("Uploaded test map fragment: #{recorder.test_count} tests")
+          else
+            print_warning("Selective could not upload this runner's test map (#{uploader.last_error&.message}). Its tests will run on the next build rather than be skipped.")
+          end
+        rescue => e
+          logger.warn("Test map upload failed: #{e.class}: #{e.message}")
+        end
+
         def correlated_files(diff, num_commits)
           Selective::Ruby::Core::FileCorrelator.new(diff, num_commits, build_env["target_branch"]).correlate
         end
 
         def test_case_callback(test_case)
-          @logger.info("Sending Response: test_case_result: #{test_case[:id]}")
+          logger.info("Sending Response: test_case_result: #{test_case[:id]}")
           write({type: "test_case_result", data: test_case})
         end
 
         def modified_test_files(diff)
-          @modified_test_files ||= begin
-            diff.filter do |f|
-              f.match?(/^#{runner.base_test_path}/)
-            end
+          @modified_test_files ||= diff.filter do |f|
+            f.match?(/^#{runner.base_test_path}/)
           end
         end
 

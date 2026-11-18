@@ -2,14 +2,38 @@
 
 RSpec.describe Selective::Ruby::Core::Controller do
   let(:runner_class) { class_double("runner_class", new: runner) }
-  let(:runner) { double("runner", finish: nil, exit_status: 1, framework: 'rspec', framework_version: "1.0", wrapper_version: "1.0") }
-  let(:controller) { dirty_dirty_unprivate_class(described_class).new(runner_class, nil) }
+  let(:runner) { double("runner", finish: nil, exit_status: 1, framework: "rspec", framework_version: "1.0", wrapper_version: "1.0") }
+  let(:build_env) do
+    {
+      "host" => "wss://app.selective.ci",
+      "api_key" => "test-api-key",
+      "platform" => "github_actions",
+      "run_id" => "1",
+      "run_attempt" => "1",
+      "runner_id" => "",
+      "branch" => "main",
+      "sha" => "abc123",
+      "git_repo_full_name" => "selectiveci/selective-ruby-core",
+      "git_provider" => "github"
+    }
+  end
+  let(:controller) do
+    dirty_dirty_unprivate_class(described_class).new(runner_class, nil).tap do |controller|
+      allow(controller).to receive(:build_env).and_return(build_env)
+    end
+  end
 
-  let!(:pipe) { Selective::Ruby::Core::NamedPipe.new("/tmp/#{controller.runner_id}_test_2", "/tmp/#{controller.runner_id}_test_1", skip_reset: true) }
-  let!(:reverse_pipe) { Selective::Ruby::Core::NamedPipe.new("/tmp/#{controller.runner_id}_test_1", "/tmp/#{controller.runner_id}_test_2", skip_reset: true) }
+  let(:incoming) { Queue.new }
+  let(:pipe) do
+    double("pipe", pid: 123, write: nil, reset!: nil, delete_pipes: nil).tap do |pipe|
+      allow(pipe).to receive(:read) { incoming.pop }
+    end
+  end
 
   before do
-    allow(Process).to receive(:spawn).and_return(123)
+    allow(Selective::Ruby::Core::StdioTransport).to receive(:open).and_return(pipe)
+    allow(controller).to receive(:ensure_transport_binary!).and_return("transport")
+    allow(controller).to receive(:ensure_transport_supports_stdio!)
     allow(controller).to receive(:kill_transport)
     allow(controller).to receive(:handle_termination_signals)
     allow(controller).to receive(:wait_for_connectivity)
@@ -68,32 +92,65 @@ RSpec.describe Selective::Ruby::Core::Controller do
 
     context "when a ConnectionLostError occurs" do
       before do
-        allow(Selective::Ruby::Core::NamedPipe).to receive(:new).and_raise(Selective::Ruby::Core::ConnectionLostError)
+        allow(controller).to receive(:puts)
+        allow(controller).to receive(:sleep)
+        allow(pipe).to receive(:reset!)
+      end
 
-        # The retry method calls start again, so we have to do some fancy mocking
-        # to ensure we do not end up in an endless loop. Normally the process would
-        # exit when the retires are exausted, but we're mocking exit above because
-        # we don't want to actually exit the test process.
-        allow(controller).to receive(:start).and_wrap_original do |original_method, *args, &block|
-          allow(controller).to receive(:start)
+      # Loses the first connection, then runs `commands` (and a close) on the
+      # second. Returns how many connections were attempted.
+      def lose_connection_once(controller, commands = [])
+        attempts = 0
+        allow(Selective::Ruby::Core::StdioTransport).to receive(:open) do
+          attempts += 1
+          raise Selective::Ruby::Core::ConnectionLostError if attempts == 1
+          pipe
+        end
+        allow(controller).to receive(:pipe).and_return(pipe)
+
+        allow(controller).to receive(:run_main_loop).and_wrap_original do |original_method, *args, &block|
+          (commands | [{command: "close"}]).each { |command| incoming << command.to_json }
           original_method.call(*args, &block)
         end
 
-        allow(controller).to receive(:puts)
-        expect(controller).to receive(:sleep)
-        expect(controller).to receive(:kill_transport)
-        expect(controller).to receive_message_chain(:pipe, :reset!)
+        controller.start
+        attempts
       end
 
-      it "increments the retries counter" do
-        expect { controller.start }.to change { controller.retries }.by(1)
+      it "reconnects and increments the retries counter" do
+        expect(lose_connection_once(controller)).to eq(2)
+        expect(controller.retries).to eq(1)
+        expect(Selective::Ruby::Core::StdioTransport).to have_received(:open).with(anything, /reconnect=true/)
+        expect(runner).to have_received(:finish).once
+      end
+
+      # SimpleCov's after_run hook exits 1 when `$!` holds an exception, so a
+      # reconnected runner must not finish inside the rescue of the lost one.
+      it "finishes the reconnected run with no pending exception" do
+        seen = :not_called
+        allow(runner).to receive(:finish) { seen = $! }
+
+        lose_connection_once(controller)
+
+        expect(seen).to be_nil
+        expect(controller).to have_received(:exit).with(1) # the double's exit_status
+      end
+
+      it "gives up after too many retries" do
+        allow(Selective::Ruby::Core::StdioTransport).to receive(:open).and_raise(Selective::Ruby::Core::ConnectionLostError)
+        allow(controller).to receive(:pipe).and_return(pipe)
+        allow(controller).to receive(:puts_indented)
+        allow(controller).to receive(:exit).with(1).and_raise(SystemExit.new(1))
+
+        expect { controller.start }.to raise_error(SystemExit)
+        expect(controller.retries).to eq(11)
       end
     end
 
     context "when an error occurs" do
       before do
         allow(controller).to receive(:puts_indented)
-        allow(Selective::Ruby::Core::NamedPipe).to receive(:new).and_raise(StandardError.new("error"))
+        allow(Selective::Ruby::Core::StdioTransport).to receive(:open).and_raise(StandardError.new("error"))
       end
 
       it "exits and prints a message about the error" do
@@ -109,9 +166,122 @@ RSpec.describe Selective::Ruby::Core::Controller do
       allow(controller).to receive(:puts_indented)
     end
 
-    it 'raises an error when required configuration is missing' do
+    it "raises an error when required configuration is missing" do
       controller.validate_build_env({})
       expect(controller).to have_received(:puts_indented).with(/Missing required environment variables: SELECTIVE_HOST/)
+    end
+  end
+
+  describe "termination signals" do
+    let(:traps) { {} }
+    let(:test_cases_run) { [] }
+
+    before do
+      allow(controller).to receive(:handle_termination_signals).and_call_original
+      allow(controller).to receive(:exit).and_call_original
+      allow(Signal).to receive(:trap) { |signal, &handler| traps[signal] = handler }
+      allow(runner).to receive(:run_test_cases) { |ids| test_cases_run.concat(ids) }
+      allow(runner).to receive(:exit_status) { test_cases_run.grep(/\Afailing/).any? ? 1 : 0 }
+      controller.handle_termination_signals(123)
+    end
+
+    def run_test_cases(*ids)
+      controller.handle_run_test_cases({test_case_ids: ids})
+    end
+
+    def exit_status_on(signal)
+      traps.fetch(signal).call
+      :did_not_exit
+    rescue SystemExit => e
+      e.status
+    end
+
+    it "exits 1 on TERM after the runner ran a failing test" do
+      run_test_cases("passing_spec.rb[1:1]", "failing_spec.rb[1:1]")
+
+      expect(exit_status_on("TERM")).to eq(1)
+      expect(controller).to have_received(:kill_transport).with(signal: "TERM").ordered
+      expect(controller).to have_received(:exit).ordered
+    end
+
+    it "exits 0 on TERM when every test the runner ran passed" do
+      run_test_cases("passing_spec.rb[1:1]", "passing_spec.rb[1:2]")
+
+      expect(exit_status_on("TERM")).to eq(0)
+    end
+
+    it "exits 0 on TERM before the runner has run a test" do
+      expect(exit_status_on("TERM")).to eq(0)
+    end
+
+    it "exits 1 on INT after the runner ran a failing test" do
+      run_test_cases("failing_spec.rb[1:1]")
+
+      expect(exit_status_on("INT")).to eq(1)
+      expect(controller).to have_received(:kill_transport).with(signal: "INT")
+    end
+    context "with a connected pipe" do
+      before do
+        allow(controller).to receive(:pipe).and_return(pipe)
+        allow(controller).to receive(:sleep)
+      end
+
+      it "tells the server which signal stopped it before killing the transport" do
+        allow(pipe).to receive(:write)
+
+        exit_status_on("TERM")
+
+        expect(pipe).to have_received(:write)
+          .with(JSON.dump({type: "terminating", data: {signal: "TERM"}})).ordered
+        expect(controller).to have_received(:kill_transport).with(signal: "TERM").ordered
+      end
+
+      it "still exits when the pipe is already gone" do
+        allow(pipe).to receive(:write).and_raise(Selective::Ruby::Core::ConnectionLostError)
+
+        expect(exit_status_on("INT")).to eq(0)
+        expect(controller).to have_received(:kill_transport).with(signal: "INT")
+      end
+
+      it "still exits when the terminating write deadlocks" do
+        allow(pipe).to receive(:write).and_raise(ThreadError)
+
+        expect(exit_status_on("TERM")).to eq(0)
+        expect(controller).to have_received(:kill_transport).with(signal: "TERM")
+      end
+
+      it "exits with the runner's status when a signal arrives after an integer close" do
+        allow(controller).to receive(:write)
+        allow(controller).to receive(:upload_test_map)
+        allow(runner).to receive(:finish)
+        allow(pipe).to receive(:delete_pipes)
+
+        expect { controller.handle_close({exit_status: 7}) }.to raise_error(SystemExit) { |error|
+          expect(error.status).to eq(7)
+        }
+        expect(exit_status_on("TERM")).to eq(0)
+      end
+
+      it "finishes the runner and lets exit reject a close status that is not an integer" do
+        allow(controller).to receive(:write)
+        allow(controller).to receive(:upload_test_map)
+        allow(runner).to receive(:finish)
+        allow(pipe).to receive(:delete_pipes)
+
+        expect { controller.handle_close({exit_status: "1"}) }.to raise_error(TypeError)
+        expect(runner).to have_received(:finish)
+      end
+
+      it "kills the transport when the exit line cannot be written" do
+        allow(controller).to receive(:kill_transport).and_call_original
+        allow(Process).to receive(:kill)
+        allow(pipe).to receive(:write).and_raise(ThreadError)
+        controller.instance_variable_set(:@transport_pid, 123)
+
+        controller.kill_transport(signal: "TERM")
+
+        expect(Process).to have_received(:kill).with("TERM", 123)
+      end
     end
   end
 
@@ -131,13 +301,8 @@ RSpec.describe Selective::Ruby::Core::Controller do
   end
 
   def send_commands(controller, commands)
-    allow(Selective::Ruby::Core::NamedPipe).to receive(:new).and_call_original
-    allow(Selective::Ruby::Core::NamedPipe).to receive(:new).with("/tmp/#{controller.runner_id}_2", "/tmp/#{controller.runner_id}_1").and_return(pipe)
-
     allow(controller).to receive(:run_main_loop).and_wrap_original do |original_method, *args, &block|
-      # Sleep here because of threads in NamedPipe
-      sleep(0.1)
-      (commands | [{command: "close"}]).each { |command| reverse_pipe.write(command.to_json) }
+      (commands | [{command: "close"}]).each { |command| incoming << command.to_json }
       original_method.call(*args, &block)
     end
 

@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+if [[ -d "${HOME}/.bundle-selective" ]]; then
+  export BUNDLE_PATH="${HOME}/.bundle-selective"
+fi
+
+config=".rubocop-simplicity.yml"
+only="Selective/SleepPollTimer,Selective/DirectEnvAssign"
+
+lint() {
+  bundle exec rubocop --config "$config" --only "$only" "$@"
+}
+
+stage() {
+  local name="$1"
+  local dest
+  dest="$(mktemp -d)"
+  mkdir -p "$dest/lib/selective/ruby/core" "$dest/spec/selective/ruby/core"
+  cp "simplicity/${name}/lib/selective/ruby/core/controller.rb" "$dest/lib/selective/ruby/core/controller.rb"
+  if [[ -f "simplicity/${name}/spec/helper_methods.rb" ]]; then
+    cp "simplicity/${name}/spec/helper_methods.rb" "$dest/spec/helper_methods.rb"
+  fi
+  cp "simplicity/${name}/spec/selective/ruby/core/controller_spec.rb" "$dest/spec/selective/ruby/core/controller_spec.rb"
+  cp "simplicity/${name}/spec/selective/ruby/core/stdio_transport_spec.rb" "$dest/spec/selective/ruby/core/stdio_transport_spec.rb"
+  cp "simplicity/${name}/spec/selective/ruby/core/stdio_controller_spec.rb" "$dest/spec/selective/ruby/core/stdio_controller_spec.rb"
+  cp "simplicity/${name}/spec/selective/ruby/core/stdio_binary_spec.rb" "$dest/spec/selective/ruby/core/stdio_binary_spec.rb"
+  printf "%s" "$dest"
+}
+
+red_dir="$(stage red)"
+green_dir="$(stage green)"
+trap 'rm -rf "$red_dir" "$green_dir"' EXIT
+
+red_log="$(mktemp)"
+set +e
+lint \
+  "$red_dir/lib/selective/ruby/core/controller.rb" \
+  "$red_dir/spec/selective/ruby/core/controller_spec.rb" \
+  "$red_dir/spec/selective/ruby/core/stdio_transport_spec.rb" \
+  "$red_dir/spec/selective/ruby/core/stdio_controller_spec.rb" \
+  "$red_dir/spec/selective/ruby/core/stdio_binary_spec.rb" \
+  >"$red_log" 2>&1
+red_status=$?
+set -e
+
+echo "RED: c2ff5fd watchdog and the four ENV save/restore copies"
+cat "$red_log"
+if [[ "$red_status" -eq 0 ]]; then
+  echo "expected the reviewed examples to fail" >&2
+  exit 1
+fi
+if ! grep -q "Sleep the full duration" "$red_log"; then
+  echo "sleep-polling timer was not flagged" >&2
+  exit 1
+fi
+if ! grep -q "Assign ENV only through with_env" "$red_log"; then
+  echo "direct ENV assignment was not flagged" >&2
+  exit 1
+fi
+for name in /controller.rb: /controller_spec.rb: /stdio_transport_spec.rb: /stdio_controller_spec.rb: /stdio_binary_spec.rb:; do
+  if ! grep -q "$name" "$red_log"; then
+    echo "expected an offense in ${name}" >&2
+    exit 1
+  fi
+done
+
+echo "GREEN: the review's recommended fix"
+lint \
+  "$green_dir/lib/selective/ruby/core/controller.rb" \
+  "$green_dir/spec/helper_methods.rb" \
+  "$green_dir/spec/selective/ruby/core/controller_spec.rb" \
+  "$green_dir/spec/selective/ruby/core/stdio_transport_spec.rb" \
+  "$green_dir/spec/selective/ruby/core/stdio_controller_spec.rb" \
+  "$green_dir/spec/selective/ruby/core/stdio_binary_spec.rb"
+
+echo "GREEN: working tree"
+lint

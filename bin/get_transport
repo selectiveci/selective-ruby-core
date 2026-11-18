@@ -1,37 +1,56 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
-# Get OS and Architecture
+TRANSPORT_REF=v0.2.0
+
 os=${1:-$(uname -s)}
 arch=${2:-$(uname -m)}
 
-# Darwin has a different architecture string for arm64
-[ "$os" = "Darwin" ] && [ "$arch" = "arm64" ] && arch="aarch64"
+if [ "$os" = "Darwin" ] && [ "$arch" = "arm64" ]; then
+  arch="aarch64"
+fi
 
-# Define base URL
-base_url="https://github.com/selectiveci/transport/releases/latest/download/transport"
-
-# Construct download URL
-url="${base_url}-${os}-${arch}.tar.gz"
-
-# Check for unsupported combinations
 if [ "$os" != "Darwin" ] && [ "$os" != "Linux" ]; then
-    echo "Unsupported OS"
-    exit 1
+  echo "Unsupported OS" >&2
+  exit 1
 fi
 
-if { [ "$os" = "Darwin" ] && [ "$arch" != "aarch64" ] && [ "$arch" != "x86_64" ]; } ||
-   { [ "$os" = "Linux" ] && [ "$arch" != "aarch64" ] && [ "$arch" != "x86_64" ]; }; then
-    echo "Unsupported Architecture"
-    exit 1
+if [ "$arch" != "aarch64" ] && [ "$arch" != "x86_64" ]; then
+  echo "Unsupported Architecture" >&2
+  exit 1
 fi
 
-# Download the binary
-curl -L --fail --silent --show-error $url -o ./temp.tar.gz
+asset="transport-${os}-${arch}.tar.gz"
 
-# Extract the binary to the lib/bin directory
-tar -xzf ./temp.tar.gz -C $(dirname "$0")/../lib/bin
+case "$asset" in
+  transport-Darwin-aarch64.tar.gz) expected=7dcaec969378a181a62749673b9c0b658be17bf16a8880f5effbd8e03a6c4a17 ;;
+  transport-Darwin-x86_64.tar.gz) expected=ccb9f795086d5584ff605cff8aefc534a82cde3154a3231f7f9396cde27bf7d4 ;;
+  transport-Linux-aarch64.tar.gz) expected=cf54fbf596b8a708fbc64e031f98737f076b8c32c371a4506c8141c49bca84be ;;
+  transport-Linux-x86_64.tar.gz) expected=87b2d6847ed0efa44c73ec16526b85134bf6f2e3759d99f925682eaf1b27d937 ;;
+esac
 
-# Remove the downloaded tar file
-rm ./temp.tar.gz
+root="$(cd "$(dirname "$0")/.." && pwd)"
+dest="$root/lib/bin"
+archive="$root/tmp/$asset"
+mkdir -p "$dest" "$root/tmp"
+trap 'rm -f "$archive"' EXIT
+
+curl -L --fail --silent --show-error \
+  "https://github.com/selectiveci/transport/releases/download/${TRANSPORT_REF}/${asset}" \
+  -o "$archive"
+
+if command -v sha256sum >/dev/null 2>&1; then
+  actual="$(sha256sum "$archive" | cut -d' ' -f1)"
+else
+  actual="$(shasum -a 256 "$archive" | cut -d' ' -f1)"
+fi
+
+if [ "$actual" != "$expected" ]; then
+  echo "Checksum mismatch for $asset" >&2
+  echo "  expected: $expected" >&2
+  echo "  actual:   $actual" >&2
+  exit 1
+fi
+
+tar -xzf "$archive" -C "$dest"

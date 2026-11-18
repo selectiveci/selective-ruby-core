@@ -4,6 +4,14 @@
 # test private methods directly because testing their behaviors through
 # public methods is not tenable.
 
+def with_env(values)
+  previous = values.keys.to_h { |key| [key, ENV[key]] }
+  ENV.update(values)
+  yield
+ensure
+  ENV.update(previous)
+end
+
 # This method returns a subclass of the given class with all private
 # instance methods made public.
 def dirty_dirty_unprivate_class(klass)

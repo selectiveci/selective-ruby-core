@@ -19,7 +19,7 @@ Gem::Specification.new do |spec|
   spec.summary = "Selective Ruby Client Core"
   spec.description = "Selective is an intelligent test runner for your current CI provider. Get real-time test results, intelligent ordering based on code changes, shorter run times, automatic flake detection, the ability to re-enqueue failed tests, and more."
   spec.homepage = "https://www.selective.ci"
-  spec.required_ruby_version = ">= 2.6.0"
+  spec.required_ruby_version = ">= 2.7.0"
 
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["source_code_uri"] = "http://github.com/selectiveci/selective-ruby-core"
@@ -29,7 +29,7 @@ Gem::Specification.new do |spec|
   # The `git ls-files -z` loads the files in the RubyGem that have been added into git.
   spec.files = Dir.chdir(__dir__) do
     `git ls-files -z`.split("\x0").reject do |f|
-      (File.expand_path(f) == __FILE__) || f.start_with?(*%w[bin/ test/ spec/ features/ log/ .git .circleci appveyor .rspec .ruby-version .standard.yml README.md CHANGELOG.md CODE_OF_CONDUCT.md Gemfile])
+      (File.expand_path(f) == __FILE__) || f.start_with?(*%w[bin/ docs/ rubocop/ simplicity/ test/ spec/ features/ log/ .git .circleci appveyor .rspec .ruby-version .standard.yml .rubocop-simplicity.yml README.md CHANGELOG.md CODE_OF_CONDUCT.md AGENTS.md Gemfile])
     end
   end
 
@@ -37,6 +37,11 @@ Gem::Specification.new do |spec|
   unless ENV["RELEASE_PLATFORM"].nil?
     spec.files << "lib/bin/transport"
   end
+
+  # The optional test map tracer. extconf.rb writes a no-op Makefile when it
+  # can't build (no compiler, unsupported Ruby), so installation never fails
+  # because of it; the runner then reports it can't record.
+  spec.extensions = ["ext/selective_tracer/extconf.rb"]
 
   spec.bindir = "exe"
   spec.executables = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
