@@ -1,3 +1,7 @@
+## [0.3.4] - 2026-11-19
+- Support GitLab. On GitLab CI the runner sends `platform=gitlab_ci`, `git_provider=gitlab` and the project path (nested groups included), branch and target branch, the merge request's head commit as `head_sha`, its diff base as `base_sha` (the push's starting commit on branch pipelines), commit title and author, the pipeline id as the run id and `CI_NODE_INDEX` as the runner id. GitLab has no attempt counter, so `run_attempt` is `1`.
+- gitlab.com remotes on other CI platforms (RWX/Mint, Buildkite, CircleCI, Semaphore, a local `origin`) now produce the GitLab project path. Self-managed GitLab can't be recognized from a URL outside GitLab CI; set `SELECTIVE_GIT_PROVIDER` and `SELECTIVE_GIT_REPO`.
+
 ## [0.3.3] - 2026-11-19
 - Bundle transport 0.3.0. When the server offers it, the transport now sends the test manifest over HTTP, as gzip in chunks, instead of as one WebSocket message. Against a server that does not offer it, the transport sends the manifest over the WebSocket as before.
 
