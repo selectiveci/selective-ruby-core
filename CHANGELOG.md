@@ -1,3 +1,13 @@
+## [0.3.3] - 2026-11-19
+- Bundle transport 0.3.0. When the server offers it, the transport now sends the test manifest over HTTP, as gzip in chunks, instead of as one WebSocket message. Against a server that does not offer it, the transport sends the manifest over the WebSocket as before.
+
+## [0.3.2] - 2026-11-18
+- Allow zeitwerk 2.7 and 2.8. The `~> 2.6.12` pin made Rails apps on current zeitwerk downgrade their autoloader to install Selective.
+- A test that asserts on binary data no longer kills the runner. Outbound payloads replace invalid UTF-8 with U+FFFD and write NUL as its printable escape; before, one such result stopped the runner and the run recorded nothing.
+
+## [0.3.1] - 2026-11-14
+- Send `head_sha`, the commit the branch points at. On GitHub Actions pull requests `sha` is GitHub's merge commit, which exists only in CI; `head_sha` is the pull request's head, so `sel tail` finds the build from a developer's checkout. Elsewhere it equals `sha`. `SELECTIVE_HEAD_SHA` overrides it.
+
 ## [0.3.0] - 2026-11-01
 - Bundle transport 0.2.0, the first release with `--stdio`. `bin/get_transport` downloads the release tag and checks each archive against a SHA-256 pinned in the script before extracting it. A mismatch prints the asset with the expected and actual hash, deletes the archive, leaves `lib/bin` untouched and exits 1. Building the transport from a commit is gone.
 - Platforms: the gem ships a transport binary for `x86_64-linux`, `aarch64-linux`, `x86_64-darwin` and `arm64-darwin`, one platform gem each. The Linux binaries are static musl, so they run on any distribution regardless of its glibc, including Alpine. The plain `ruby` platform gem, which RubyGems installs on any other platform, has no binary: set `SELECTIVE_TRANSPORT` to the path of a transport 0.2.0 or newer, or the runner exits 1 with "Selective transport binary not found".
