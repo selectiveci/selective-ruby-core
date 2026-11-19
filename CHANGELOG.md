@@ -1,3 +1,6 @@
+## [0.3.3] - 2026-11-19
+- Bundle transport 0.3.0. When the server offers it, the transport now sends the test manifest over HTTP, as gzip in chunks, instead of as one WebSocket message. Against a server that does not offer it, the transport sends the manifest over the WebSocket as before.
+
 ## [0.3.2] - 2026-11-18
 - Allow zeitwerk 2.7 and 2.8. The `~> 2.6.12` pin made Rails apps on current zeitwerk downgrade their autoloader to install Selective.
 - A test that asserts on binary data no longer kills the runner. Outbound payloads replace invalid UTF-8 with U+FFFD and write NUL as its printable escape; before, one such result stopped the runner and the run recorded nothing.

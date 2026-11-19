@@ -53,7 +53,7 @@ printed by the transport itself.
 A binary without `--stdio`, such as v0.1.1 or v0.1.2, is rejected before it
 starts: the runner exits 1 and asks for transport 0.2.0 or newer. A binary that cannot run at all
 exits 1 with its own error. `bin/get_transport` downloads the release tag in
-`TRANSPORT_REF` at the top of that script, v0.2.0, and checks it against the
+`TRANSPORT_REF` at the top of that script, v0.3.0, and checks it against the
 SHA-256 pinned there before extracting it into `lib/bin`. A mismatch exits 1
 and leaves `lib/bin` untouched. `bin/release` runs it for every platform.
 
