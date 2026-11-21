@@ -308,4 +308,106 @@ RSpec.describe Selective::Ruby::Core::Controller do
 
     controller.start
   end
+  describe "workers" do
+    after { Selective::Ruby::Core::Workers.reset! }
+
+    def runner_id_with(env)
+      with_env({"PARALLEL_TEST_GROUPS" => nil, "RSPEC_FORMATTER_OUTPUT_ID" => nil, "TEST_ENV_NUMBER" => nil, "SELECTIVE_WORKER_INDEX" => nil}.merge(env)) do
+        controller.runner_id
+      end
+    end
+
+    it "names a worker after the node's runner id" do
+      build_env["runner_id"] = "node-3"
+
+      expect(runner_id_with("SELECTIVE_WORKER_INDEX" => "2")).to eq("node-3-w2")
+    end
+
+    it "names each parallel_tests process after its TEST_ENV_NUMBER" do
+      build_env["runner_id"] = "node-3"
+
+      expect(runner_id_with("PARALLEL_TEST_GROUPS" => "4", "TEST_ENV_NUMBER" => "")).to eq("node-3-p1")
+      controller.instance_variable_set(:@runner_id, nil)
+      expect(runner_id_with("PARALLEL_TEST_GROUPS" => "4", "TEST_ENV_NUMBER" => "3")).to eq("node-3-p3")
+    end
+
+    it "keeps the runner id as given outside workers and outer tools" do
+      build_env["runner_id"] = "node-3"
+
+      expect(runner_id_with({})).to eq("node-3")
+    end
+
+    context "when an outer tool started this process" do
+      around do |example|
+        with_env("PARALLEL_TEST_GROUPS" => "3", "TEST_ENV_NUMBER" => "2", "SELECTIVE_WORKER_INDEX" => nil) { example.run }
+      end
+
+      before { allow(controller).to receive(:connect_and_run).and_return(true) }
+
+      it "refuses a slice of the suite" do
+        allow(runner).to receive(:targeted?).and_return(true)
+        allow(controller).to receive(:puts_indented)
+        allow(controller).to receive(:exit).and_raise(SystemExit)
+
+        expect { controller.start }.to raise_error(SystemExit)
+        expect(controller).to have_received(:puts_indented).with(/parallel_tests gave this process part of the suite.*selective rspec --workers N/m)
+        expect(controller).not_to have_received(:connect_and_run)
+      end
+
+      it "runs the whole suite as its own runner" do
+        allow(runner).to receive(:targeted?).and_return(false)
+        allow(runner).to receive(:default_workers).and_return([4, "Rails parallelize"])
+        allow(Selective::Ruby::Core::Workers).to receive(:launch)
+
+        controller.start
+
+        expect(Selective::Ruby::Core::Workers).not_to have_received(:launch)
+        expect(controller).to have_received(:connect_and_run)
+      end
+    end
+
+    context "with more than one worker" do
+      around do |example|
+        with_env("SELECTIVE_WORKER_INDEX" => nil, "SELECTIVE_WORKERS" => nil, "PARALLEL_TEST_GROUPS" => nil, "TEST_ENV_NUMBER" => nil) { example.run }
+      end
+
+      before do
+        build_env["runner_id"] = "node-3"
+        allow(runner).to receive(:default_workers).and_return([3, "Rails parallelize"])
+        allow(controller).to receive(:puts)
+        allow(controller).to receive(:connect_and_run).and_return(true)
+        allow(Selective::Ruby::Core::Workers).to receive(:launch) { allow(Selective::Ruby::Core::Workers).to receive(:index).and_return(0) }
+        allow(Selective::Ruby::Core::Workers).to receive(:start_worker)
+        allow(Selective::Ruby::Core::Workers::Rails).to receive(:install)
+      end
+
+      it "starts the other workers and runs as worker 0" do
+        controller.start
+
+        expect(Selective::Ruby::Core::Workers).to have_received(:launch).with(3, runner_id: "node-3")
+        expect(Selective::Ruby::Core::Workers::Rails).to have_received(:install).at_least(:once)
+        expect(controller).to have_received(:puts).with("Selective: running 3 workers (Rails parallelize)")
+        expect(Selective::Ruby::Core::Workers).to have_received(:start_worker)
+        expect(controller).to have_received(:connect_and_run).once
+        expect(controller.runner_id).to eq("node-3-w0")
+      end
+
+      it "runs a worker it started as a single runner" do
+        with_env("SELECTIVE_WORKER_INDEX" => "2") { controller.start }
+
+        expect(Selective::Ruby::Core::Workers).not_to have_received(:launch)
+        expect(Selective::Ruby::Core::Workers).to have_received(:start_worker)
+        expect(controller).to have_received(:connect_and_run).once
+      end
+
+      it "starts no workers when the count is one" do
+        allow(runner).to receive(:default_workers).and_return(nil)
+
+        controller.start
+
+        expect(Selective::Ruby::Core::Workers).not_to have_received(:launch)
+        expect(Selective::Ruby::Core::Workers).not_to have_received(:start_worker)
+      end
+    end
+  end
 end

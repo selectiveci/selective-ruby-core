@@ -14,7 +14,7 @@ RSpec.describe Selective::Ruby::Core::Init do
       let(:args) { %w[exec mock_runner] }
 
       it "initializes runner and calls exec" do
-        expect(Selective::Ruby::Core::Controller).to have_received(:new).with(mock_runner_class, [], debug: false, log: false)
+        expect(Selective::Ruby::Core::Controller).to have_received(:new).with(mock_runner_class, [], debug: false, log: false, workers: nil)
         expect(mock_controller).to have_received(:exec)
       end
     end
@@ -23,7 +23,7 @@ RSpec.describe Selective::Ruby::Core::Init do
       let(:args) { %w[exec mock_runner --dry-run] }
 
       it "initializes runner with the --dry-run option and calls exec" do
-        expect(Selective::Ruby::Core::Controller).to have_received(:new).with(mock_runner_class, ["--dry-run"], debug: false, log: false)
+        expect(Selective::Ruby::Core::Controller).to have_received(:new).with(mock_runner_class, ["--dry-run"], debug: false, log: false, workers: nil)
         expect(mock_controller).to have_received(:exec)
       end
     end
@@ -32,7 +32,7 @@ RSpec.describe Selective::Ruby::Core::Init do
       let(:args) { %w[mock_runner] }
 
       it "initializes runner and calls start" do
-        expect(Selective::Ruby::Core::Controller).to have_received(:new).with(mock_runner_class, [], debug: false, log: false)
+        expect(Selective::Ruby::Core::Controller).to have_received(:new).with(mock_runner_class, [], debug: false, log: false, workers: nil)
         expect(mock_controller).to have_received(:start)
       end
     end
@@ -41,7 +41,7 @@ RSpec.describe Selective::Ruby::Core::Init do
       let(:args) { %w[mock_runner --debug] }
 
       it "initializes runner with debug and calls start" do
-        expect(Selective::Ruby::Core::Controller).to have_received(:new).with(mock_runner_class, [], debug: true, log: false)
+        expect(Selective::Ruby::Core::Controller).to have_received(:new).with(mock_runner_class, [], debug: true, log: false, workers: nil)
         expect(mock_controller).to have_received(:start)
       end
     end
@@ -50,7 +50,7 @@ RSpec.describe Selective::Ruby::Core::Init do
       let(:args) { %w[mock_runner --log] }
 
       it "initializes runner with debug and calls start" do
-        expect(Selective::Ruby::Core::Controller).to have_received(:new).with(mock_runner_class, [], debug: false, log: true)
+        expect(Selective::Ruby::Core::Controller).to have_received(:new).with(mock_runner_class, [], debug: false, log: true, workers: nil)
         expect(mock_controller).to have_received(:start)
       end
     end
@@ -59,8 +59,24 @@ RSpec.describe Selective::Ruby::Core::Init do
       let(:args) { %w[mock_runner spec/foo/bar_spec.rb] }
 
       it "initializes runner with file path and calls start" do
-        expect(Selective::Ruby::Core::Controller).to have_received(:new).with(mock_runner_class, ["spec/foo/bar_spec.rb"], debug: false, log: false)
+        expect(Selective::Ruby::Core::Controller).to have_received(:new).with(mock_runner_class, ["spec/foo/bar_spec.rb"], debug: false, log: false, workers: nil)
         expect(mock_controller).to have_received(:start)
+      end
+    end
+
+    context "with 'selective mock_runner --workers 4 spec'" do
+      let(:args) { %w[mock_runner --workers 4 spec] }
+
+      it "passes the worker count and leaves the rest for the runner" do
+        expect(Selective::Ruby::Core::Controller).to have_received(:new).with(mock_runner_class, ["spec"], debug: false, log: false, workers: "4")
+      end
+    end
+
+    context "with 'selective mock_runner --workers=auto'" do
+      let(:args) { %w[mock_runner --workers=auto] }
+
+      it "passes the worker count" do
+        expect(Selective::Ruby::Core::Controller).to have_received(:new).with(mock_runner_class, [], debug: false, log: false, workers: "auto")
       end
     end
   end
