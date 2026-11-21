@@ -30,8 +30,10 @@ module Selective
 
       class Init
         def initialize(args)
+          Workers.capture(args.dup)
           @debug = !args.delete("--debug").nil?
           @log = !args.delete("--log").nil?
+          @workers = extract_workers(args)
           @runner_name, @args, @command = parse_args(args)
           require_runner
         end
@@ -42,10 +44,23 @@ module Selective
 
         private
 
-        attr_reader :debug, :log, :runner_name, :args, :command
+        attr_reader :debug, :log, :workers, :runner_name, :args, :command
 
         def run
-          Selective::Ruby::Core::Controller.new(runner_class, args, debug: debug, log: log).send(command)
+          if command == :start
+            Workers.watch_parent if Workers.sibling?
+            Workers.prepare(workers)
+          end
+          Selective::Ruby::Core::Controller.new(runner_class, args, debug: debug, log: log, workers: workers).send(command)
+        end
+
+        # `--workers N` or `--workers=N`; nil when absent.
+        def extract_workers(args)
+          index = args.index { |arg| arg == "--workers" || arg.start_with?("--workers=") }
+          return if index.nil?
+
+          flag = args.delete_at(index)
+          flag.include?("=") ? flag.split("=", 2).last : args.delete_at(index)
         end
 
         def parse_args(args)

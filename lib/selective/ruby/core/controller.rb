@@ -26,9 +26,10 @@ module Selective
           "git_provider" => "SELECTIVE_GIT_PROVIDER"
         }.freeze
 
-        def initialize(runner_class, runner_args, debug: false, log: false)
+        def initialize(runner_class, runner_args, debug: false, log: false, workers: nil)
           @debug = debug
           @log = log
+          @requested_workers = workers
           @runner = runner_class.new(runner_args, method(:test_case_callback))
           @retries = 0
           @pending_commands = []
@@ -42,6 +43,15 @@ module Selective
         # run having crashed and exits 1, so every CI shard whose connection
         # dropped once failed with no failing test.
         def start(reconnect: false)
+          unless reconnect
+            unless Workers.sibling?
+              refuse_outer_split!
+              plan = workers_plan
+              launch_workers(plan) if plan.count > 1
+            end
+            start_worker if Workers.worker?
+          end
+
           loop do
             break if connect_and_run(reconnect: reconnect)
 
@@ -82,7 +92,49 @@ module Selective
         # connects, so it must not require the CI environment that naming a
         # runner validates.
         def runner_id
-          @runner_id ||= safe_filename(get_runner_id)
+          @runner_id ||= if Workers.worker?
+            "#{base_runner_id}-w#{Workers.index}"
+          elsif Workers.outer_tool
+            "#{base_runner_id}-p#{Workers.outer_process_number}"
+          else
+            base_runner_id
+          end
+        end
+
+        # Each process of an outer tool that split the suite would offer
+        # Selective a different slice of it as the whole manifest.
+        def refuse_outer_split!
+          tool = Workers.outer_tool
+          return if tool.nil?
+          return unless runner.respond_to?(:targeted?) && runner.targeted?
+
+          with_error_handling(include_header: false) do
+            raise "#{tool} gave this process part of the suite, but Selective needs every process to load all of it " \
+              "and distributes the tests itself. Run `selective #{runner.framework} --workers N` in place of #{tool}, " \
+              "or have #{tool} start the same full `selective #{runner.framework}` command in every process."
+          end
+        end
+
+        def base_runner_id
+          @base_runner_id ||= safe_filename(get_runner_id)
+        end
+
+        def workers_plan
+          with_error_handling { Workers.plan(@requested_workers, runner) }
+        end
+
+        # Validates the environment once, then starts the other workers; this
+        # process carries on as worker 0.
+        def launch_workers(plan)
+          build_env
+          Workers::Rails.install
+          puts "Selective: running #{plan.count} workers#{" (#{plan.source})" if plan.source}"
+          Workers.launch(plan.count, runner_id: base_runner_id)
+        end
+
+        def start_worker
+          Workers::Rails.install
+          Workers.start_worker
         end
 
         def logger
@@ -307,6 +359,10 @@ module Selective
         def handle_termination_signals(pid)
           ["INT", "TERM"].each do |signal|
             Signal.trap(signal) do
+              next if @terminating
+
+              @terminating = true
+              Workers.signal_siblings(signal)
               report_termination(signal)
               kill_transport(signal: signal)
               exit(runner.exit_status)
@@ -423,6 +479,8 @@ module Selective
             Selective::Ruby::Core::Controller.report_at_finish[:connection_retries] = @retries
             write({type: "report_at_finish", data: Selective::Ruby::Core::Controller.report_at_finish})
 
+            Workers.wait_for_siblings
+            Workers.finish_worker
             runner.finish unless exit_status.is_a?(Integer)
           end
 

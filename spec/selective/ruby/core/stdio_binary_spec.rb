@@ -34,11 +34,11 @@ RSpec.describe "transport --stdio binary" do
     File.executable?(binary) && `#{binary} --help 2>&1`.include?("--stdio")
   end
 
+  # nil when /proc is unavailable or the process has already exited.
   def command_line(pid)
-    path = "/proc/#{pid}/cmdline"
-    return unless File.exist?(path)
-
-    File.read(path).split("\0")
+    File.read("/proc/#{pid}/cmdline").split("\0")
+  rescue Errno::ENOENT, Errno::ESRCH
+    nil
   end
 
   it "connects with the url only in the environment and exits 1 when the port refuses" do
