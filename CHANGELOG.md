@@ -1,4 +1,4 @@
-## [Unreleased]
+## [0.4.0] - 2026-11-24
 - Stop correlating the diff with spec files from the target branch's last 1,000 commits. The server no longer uses it, and it cost a deep `git fetch` plus one `git diff-tree` per commit (about 16 seconds on a large repository) before the manifest could be sent.
 - Fetch only the target branch's tip for the diff of modified test files, and only pass `--depth` when the clone is already shallow, so a full clone stays whole.
 - Report where a runner's time goes: the manifest carries the runner's startup timeline (process start, gem load, runner ready, connected, manifest requested, list/tree/diff durations, sent), and `report_at_finish` carries batch totals (batches, examples, time inside examples versus the rest of each batch, waiting before the first batch and between batches, result writes). Clock reads only.
