@@ -13,6 +13,8 @@ loader.setup
 module Selective
   module Ruby
     module Core
+      LOADED_AT_MS = Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond)
+
       class Error < StandardError; end
       class ConnectionLostError < StandardError; end
 
