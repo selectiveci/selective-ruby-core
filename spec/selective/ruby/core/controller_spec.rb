@@ -285,6 +285,73 @@ RSpec.describe Selective::Ruby::Core::Controller do
     end
   end
 
+  describe "timings" do
+    let(:written) { [] }
+
+    before do
+      allow(controller).to receive(:write) { |message| written << message }
+      allow(controller).to receive(:upload_test_map)
+      allow(runner).to receive(:manifest).and_return({"examples" => [{id: "a_spec.rb[1:1]", file_path: "a_spec.rb"}]})
+      allow(runner).to receive(:run_test_cases) { |ids| ids.each { |id| controller.test_case_callback({id: id, run_time: 0.25}) } }
+    end
+
+    it "sends the startup timeline with the manifest" do
+      controller.handle_test_manifest({})
+
+      timings = written.last.dig(:data, :timings)
+      expect(timings.keys).to include("core_loaded_at", "runner_ready_at", "manifest_requested_at", "manifest_list_ms", "manifest_diff_ms", "manifest_sent_at")
+      expect(timings["manifest_sent_at"]).to be >= timings["manifest_requested_at"]
+      expect(timings["runner_ready_at"]).to be >= timings["core_loaded_at"]
+    end
+
+    it "reports batch totals at finish" do
+      controller.handle_run_test_cases({test_case_ids: ["a_spec.rb[1:1]", "a_spec.rb[1:2]"]})
+      controller.handle_run_test_cases({test_case_ids: ["b_spec.rb[1:1]"]})
+      controller.instance_variable_set(:@pipe, pipe)
+      controller.handle_close({exit_status: 0})
+
+      report = written.find { |message| message[:type] == "report_at_finish" }
+      expect(report.dig(:data, :timings)).to include(
+        "batches" => 2,
+        "examples" => 3,
+        "example_ms" => 750
+      )
+      expect(report.dig(:data, :timings).keys).to include("run_ms", "idle_between_batches_ms", "result_write_ms", "first_batch_at", "last_batch_at")
+    end
+  end
+
+  describe "#get_diff" do
+    let(:success) { instance_double(Process::Status, success?: true) }
+    let(:fetches) { [] }
+
+    before do
+      build_env["target_branch"] = "main"
+      allow(Open3).to receive(:capture2e) do |command|
+        fetches << command if command.start_with?("git fetch")
+        output = command.start_with?("git rev-parse") ? "#{shallow}\n" : "app/models/a.rb\nspec/models/a_spec.rb\n"
+        [output, success]
+      end
+    end
+
+    context "in a shallow clone" do
+      let(:shallow) { "true" }
+
+      it "fetches only the target's tip" do
+        expect(controller.get_diff).to eq(["app/models/a.rb", "spec/models/a_spec.rb"])
+        expect(fetches).to eq(["git fetch origin main --depth=1"])
+      end
+    end
+
+    context "in a full clone" do
+      let(:shallow) { "false" }
+
+      it "fetches without a depth, so the clone stays whole" do
+        controller.get_diff
+        expect(fetches).to eq(["git fetch origin main"])
+      end
+    end
+  end
+
   describe "exec" do
     context "when an error occurs" do
       before do

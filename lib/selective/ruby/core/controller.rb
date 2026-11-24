@@ -29,7 +29,9 @@ module Selective
         def initialize(runner_class, runner_args, debug: false, log: false)
           @debug = debug
           @log = log
+          @timings = Timings.new
           @runner = runner_class.new(runner_args, method(:test_case_callback))
+          @timings.mark("runner_ready")
           @retries = 0
           @pending_commands = []
         end
@@ -75,12 +77,11 @@ module Selective
 
         private
 
-        attr_reader :runner, :pipe, :transport_pid, :retries, :diff
+        attr_reader :runner, :pipe, :transport_pid, :retries, :timings
 
         # Resolved on first use rather than in the constructor: `selective
-        # exec` (the plain framework run behind the manifest dry-run) never
-        # connects, so it must not require the CI environment that naming a
-        # runner validates.
+        # exec` (a plain framework run) never connects, so it must not require
+        # the CI environment that naming a runner validates.
         def runner_id
           @runner_id ||= safe_filename(get_runner_id)
         end
@@ -117,7 +118,10 @@ module Selective
         def next_command
           return @pending_commands.shift if @pending_commands.any?
 
-          JSON.parse(pipe.read, symbolize_names: true)
+          started = Timings.monotonic_ms
+          message = pipe.read
+          timings.waited(Timings.monotonic_ms - started)
+          JSON.parse(message, symbolize_names: true)
         end
 
         # One connection: true when the run finished on it, false when it was
@@ -296,6 +300,7 @@ module Selective
             message = pipe.read
             response = JSON.parse(message, symbolize_names: true)
             if response[:command] == "connected"
+              timings.mark("connected")
               @connectivity = true
               break
             end
@@ -370,17 +375,19 @@ module Selective
         end
 
         def handle_test_manifest(_data)
+          timings.mark("manifest_requested")
           self.class.restore_reporting!
           logger.info("Sending Response: test_manifest")
-          data = {test_cases: runner.manifest["examples"] || runner.manifest["test_cases"]}
-          if TestMap.tree_requested? && (tree = test_map_tree)
+          manifest = timings.measure("manifest_list") { runner.manifest }
+          data = {test_cases: manifest["examples"] || manifest["test_cases"]}
+          if TestMap.tree_requested? && (tree = timings.measure("manifest_tree") { test_map_tree })
             data[:test_map_tree] = tree
           end
-          num_commits = build_env["num_commits"] || 1000
-          if (diff = get_diff(num_commits))
+          if (diff = timings.measure("manifest_diff") { get_diff })
             data[:modified_test_files] = modified_test_files(diff)
-            data[:correlated_files] = correlated_files(diff, num_commits)
           end
+          timings.mark("manifest_sent")
+          data[:timings] = timings.startup
           write({type: "test_manifest", data: data})
         end
 
@@ -401,7 +408,7 @@ module Selective
         end
 
         def handle_run_test_cases(data)
-          runner.run_test_cases(data[:test_case_ids])
+          timings.batch { runner.run_test_cases(data[:test_case_ids]) }
         end
 
         # Todo: Rename this command to match the method name
@@ -421,6 +428,7 @@ module Selective
 
           with_error_handling do
             Selective::Ruby::Core::Controller.report_at_finish[:connection_retries] = @retries
+            Selective::Ruby::Core::Controller.report_at_finish[:timings] = timings.finish
             write({type: "report_at_finish", data: Selective::Ruby::Core::Controller.report_at_finish})
 
             runner.finish unless exit_status.is_a?(Integer)
@@ -464,13 +472,12 @@ module Selective
           logger.warn("Test map upload failed: #{e.class}: #{e.message}")
         end
 
-        def correlated_files(diff, num_commits)
-          Selective::Ruby::Core::FileCorrelator.new(diff, num_commits, build_env["target_branch"]).correlate
-        end
-
         def test_case_callback(test_case)
           logger.info("Sending Response: test_case_result: #{test_case[:id]}")
+          timings.example(test_case[:run_time])
+          started = Timings.monotonic_ms
           write({type: "test_case_result", data: test_case})
+          timings.wrote(Timings.monotonic_ms - started)
         end
 
         def modified_test_files(diff)
@@ -479,11 +486,15 @@ module Selective
           end
         end
 
-        def get_diff(num_commits)
+        # Two-dot diff against the target's tip: comparing trees needs no
+        # history, so one commit is enough. A full clone is fetched without a
+        # depth, which would otherwise make it shallow.
+        def get_diff
           target_branch = build_env["target_branch"]
           return if target_branch.nil? || target_branch.empty?
 
-          Open3.capture2e("git fetch origin #{target_branch} --depth=#{num_commits}").then do |output, status|
+          depth = shallow_repository? ? " --depth=1" : ""
+          Open3.capture2e("git fetch origin #{target_branch}#{depth}").then do |output, status|
             unless status.success?
               print_warning "Selective was unable to fetch the target branch. This may result in a sub-optimal test order. If the issue persists, please contact support. The output was:\n\n#{output}"
               return
@@ -498,6 +509,11 @@ module Selective
               nil
             end
           end
+        end
+
+        def shallow_repository?
+          output, status = Open3.capture2e("git rev-parse --is-shallow-repository")
+          status.success? && output.strip == "true"
         end
 
         def debug?
